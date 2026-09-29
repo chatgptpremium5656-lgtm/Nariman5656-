@@ -1,0 +1,647 @@
+diff --git a/Assets/Drive/Scripts/Presentation/Art.cs b/Assets/Drive/Scripts/Presentation/Art.cs
+index 7327a54..594b4fa 100644
+--- a/Assets/Drive/Scripts/Presentation/Art.cs
++++ b/Assets/Drive/Scripts/Presentation/Art.cs
+@@ -792,15 +792,64 @@ namespace Autobahn
+         // A car with 139 parts drew 139 times, and three times more for the shadow cascades.
+         static readonly Dictionary<string, Mesh> mergedModels = new();
+ 
++        // Parts nobody sees on a car going past (the interior, the engine bay, the suspension):
++        // a traffic car goes without them. Matched against object, mesh and material names.
++        static readonly string[] insideParts =
++        {
++            "interior", "seat", "dash", "engine", "suspension", "steering", "pedal", "cockpit", "gauge",
++            "speedo", "radiator", "gearbox", "transmission", "shock", "driveshaft", "battery", "salon",
++        };
++
++        // ...but never the outside of the body ("engine hood", "seat cover" panels).
++        static readonly string[] outsideWords = { "hood", "bonnet", "cover", "lid", "body", "paint", "glass", "window" };
++
++        public static bool InsidePart(string name)
++        {
++            if (string.IsNullOrEmpty(name)) return false;
++            string n = name.ToLowerInvariant();
++            foreach (var word in outsideWords)
++                if (n.Contains(word)) return false;
++            foreach (var part in insideParts)
++                if (n.Contains(part)) return true;
++            return false;
++        }
++
++        // Switches off the renderers of a car's inside parts (see InsidePart); returns how many.
++        // If that would be every renderer, the names mean something else: none are switched off.
++        public static int DropInside(Transform car)
++        {
++            var drop = new List<Renderer>();
++            int visible = 0;
++            foreach (var r in car.GetComponentsInChildren<Renderer>(true))
++            {
++                if (!r.enabled || r is ParticleSystemRenderer) continue;
++                visible++;
++                var f = r.GetComponent<MeshFilter>();
++                bool inside = InsidePart(r.name) || (f && f.sharedMesh && InsidePart(f.sharedMesh.name));
++                // A renderer all of whose materials are inside ones goes too.
++                if (!inside && r.sharedMaterials.Length > 0)
++                {
++                    inside = true;
++                    foreach (var m in r.sharedMaterials)
++                        if (!m || !InsidePart(m.name)) { inside = false; break; }
++                }
++                if (inside) drop.Add(r);
++            }
++            if (drop.Count >= visible) return 0;
++            foreach (var r in drop) r.enabled = false;
++            return drop.Count;
++        }
++
+         // `share`: models built the same way (the same car style) reuse one merged mesh; only the
+-        // materials (each car's own paint) differ.
+-        public static void MergeModel(Transform parent, string share = null)
++        // materials (each car's own paint) differ. `outsideOnly`: without the inside parts (traffic).
++        public static void MergeModel(Transform parent, string share = null, bool outsideOnly = false)
+         {
+             var groups = new Dictionary<Material, List<CombineInstance>>();
+             var order = new List<Material>();
+             var done = new List<MeshFilter>();
+             bool shadows = false;
+             var toParent = parent.worldToLocalMatrix;
++            if (outsideOnly) DropInside(parent);
+             foreach (var f in parent.GetComponentsInChildren<MeshFilter>())
+             {
+                 var r = f.GetComponent<MeshRenderer>();
+@@ -813,6 +862,8 @@ namespace Autobahn
+                 {
+                     var mat = mats[Mathf.Min(k, mats.Length - 1)];
+                     if (!mat) continue;
++                    // One mesh with the body and the seats in it: only the body's sub-meshes.
++                    if (outsideOnly && InsidePart(mat.name)) continue;
+                     if (!groups.TryGetValue(mat, out var list)) { groups[mat] = list = new List<CombineInstance>(); order.Add(mat); }
+                     list.Add(new CombineInstance { mesh = mesh, subMeshIndex = k, transform = matrix });
+                 }
+@@ -820,7 +871,7 @@ namespace Autobahn
+                 done.Add(f);
+             }
+             if (done.Count < 2) return;
+-            string key = share != null ? share + "#" + order.Count + "#" + done.Count : null;
++            string key = share != null ? share + "#" + order.Count + "#" + done.Count + (outsideOnly ? "#outside" : "") : null;
+             if (key == null || !mergedModels.TryGetValue(key, out Mesh merged) || !merged)
+             {
+                 merged = BuildMerged(parent.name, order, groups);
+diff --git a/Assets/Drive/Scripts/Presentation/DriveHud.cs b/Assets/Drive/Scripts/Presentation/DriveHud.cs
+index c9f759b..4deb59e 100644
+--- a/Assets/Drive/Scripts/Presentation/DriveHud.cs
++++ b/Assets/Drive/Scripts/Presentation/DriveHud.cs
+@@ -690,7 +690,6 @@ namespace Autobahn
+         static readonly string[] WeatherLabels = { "ПОГОДА  /  ЯСНО", "ПОГОДА  /  ДОЖДЬ", "ПОГОДА  /  ТУМАН", "ПОГОДА  /  СНЕГ" };
+         static readonly string[] TrafficLabels = { "ТРАФИК  /  МАЛО", "ТРАФИК  /  СРЕДНЕ", "ТРАФИК  /  МНОГО" };
+         static readonly string[] LookLabels = { "ОБЗОР КАМЕРЫ  /  0.5×", "ОБЗОР КАМЕРЫ  /  0.75×", "ОБЗОР КАМЕРЫ  /  1×", "ОБЗОР КАМЕРЫ  /  1.5×", "ОБЗОР КАМЕРЫ  /  2×" };
+-        static readonly string[] GraphicsLabels = { "ГРАФИКА  /  БЫСТРАЯ", "ГРАФИКА  /  ВЫСОКАЯ", "ГРАФИКА  /  ВЫСОКАЯ", "ГРАФИКА  /  ВЫСОКАЯ" };
+         string[] radioLabels;
+ 
+         string RadioLabel(CarRadio radio)
+@@ -764,7 +763,8 @@ namespace Autobahn
+             menuButton = 9;
+             VolumeControl(col2, y, half);
+             y += 50;
+-            if (Item(10, new Rect(x, y, half, 42), GraphicsLabels[Mathf.Clamp(GraphicsQuality.Level, 0, GraphicsLabels.Length - 1)], 15)) ActivateMenu(10);
++            // ВЫСОКАЯ → БЫСТРАЯ → МОБИЛЬНАЯ (GraphicsQuality.Cycle).
++            if (Item(10, new Rect(x, y, half, 42), GraphicsQuality.Label, 15)) ActivateMenu(10);
+             if (Item(11, new Rect(col2, y, half, 42), "СТУДИЯ  /  ПОКРАСКА", 15)) ActivateMenu(11);
+             y += 50;
+             var radio = CarRadio.Active;
+diff --git a/Assets/Drive/Scripts/Presentation/GraphicsQuality.cs b/Assets/Drive/Scripts/Presentation/GraphicsQuality.cs
+index 0397dfd..0812120 100644
+--- a/Assets/Drive/Scripts/Presentation/GraphicsQuality.cs
++++ b/Assets/Drive/Scripts/Presentation/GraphicsQuality.cs
+@@ -4,13 +4,19 @@ using UnityEngine.Rendering.Universal;
+ 
+ namespace Autobahn
+ {
+-    // Two graphics presets for the player, Fast and High (F8 or the pause menu); the two in
+-    // between (Balanced, Ultra) are only used by the automated measurements now.
++    // Three graphics presets for the player, High, Fast and Mobile (F8 or the pause menu); the
++    // two in between (Balanced, Ultra) are only used by the automated measurements now.
++    // Mobile is Fast cut down further for weak Macs and phones: 30 frames a second, 720p, one
++    // shadow cascade, the shortest view, fewer street lights, traffic cars and trees.
+     // The choice is remembered between launches.
+     public static class GraphicsQuality
+     {
+         public static readonly string[] Names = { "Fast", "Balanced", "High", "Ultra" };
+         public static int Level { get; private set; } = 1;
++        // Mobile always runs on the Fast level (everything that asks for Level == 0 gets it).
++        static bool mobile;
++        public static bool Mobile { get { LoadChoice(); return mobile; } }
++        public static string Label => Mobile ? "ГРАФИКА  /  МОБИЛЬНАЯ" : Level == 0 ? "ГРАФИКА  /  БЫСТРАЯ" : "ГРАФИКА  /  ВЫСОКАЯ";
+         // Anti-aliasing, chosen in the settings: off, or the strongest there is (high-quality SMAA
+         // on top of 4× multisampling).
+         public static readonly string[] AntiAliasingNames = { "ВЫКЛ", "МАКСИМУМ" };
+@@ -25,17 +31,20 @@ namespace Autobahn
+             Apply(Level);
+         }
+         // How far the world is drawn; fog closes in before it, so nothing pops.
+-        public static float ViewDistance => Level switch { 0 => 420f, 1 => 650f, 2 => 950f, _ => 1300f };
++        public static float ViewDistance => mobile ? 300f : Level switch { 0 => 420f, 1 => 650f, 2 => 950f, _ => 1300f };
+         // Buildings, ground and roads are drawn much further than the detail (trees, props,
+         // traffic), fading into the haze: before, half the city ended in a white void.
+-        public static float FarReach => Level switch { 0 => 1000f, 1 => 1400f, 2 => 1900f, _ => 2500f };
++        // (It is also how far the island is built round the player: WorldStreamer.)
++        public static float FarReach => mobile ? 650f : Level switch { 0 => 1000f, 1 => 1400f, 2 => 1900f, _ => 2500f };
+         // Pixels actually rendered are capped per preset (Retina screens have four times the
+         // pixels of a 1080p one); FSR scales the image up to the window.
+         // (Sharpness pass 2026-09-28: the old caps, 720/900/1200 px and 60-90 % scale, rendered a
+         // Retina screen at about 60 % and made the picture soft. Now full resolution up to 1440 p
+         // on High, and FSR 1 with strong sharpening only above that.)
+-        static float MaxHeight => Level switch { 0 => 1080f, 1 => 1260f, 2 => 1440f, _ => 2160f };
++        static float MaxHeight => mobile ? 720f : Level switch { 0 => 1080f, 1 => 1260f, 2 => 1440f, _ => 2160f };
+         static int lastHeight;
++        // Mobile goes down to 720p even on a big Retina screen.
++        static float MinScale => mobile ? .25f : .45f;
+         static Bloom bloom;
+         static MotionBlur blur;
+         static Vignette vignette;
+@@ -53,22 +62,69 @@ namespace Autobahn
+                 profile.TryGet(out vignette);
+                 profile.TryGet(out fringe);
+             }
+-            if (!loaded)
+-            {
+-                loaded = true;
+-                try { Level = ProfileStore.Testing ? 1 : PlayerPrefs.GetInt("autobahn.gfx2", 2) == 0 ? 0 : 2; } catch { }
+-                try { AntiAliasing = ProfileStore.Testing ? 1 : PlayerPrefs.GetInt("autobahn.aa2", 1) == 0 ? 0 : 1; } catch { }
+-            }
++            LoadChoice();
+             Apply(Level);
+         }
+ 
++        // The player's choice from the last launch (phones start on Mobile).
++        static void LoadChoice()
++        {
++            if (loaded) return;
++            loaded = true;
++            try { Level = ProfileStore.Testing ? 1 : PlayerPrefs.GetInt("autobahn.gfx2", 2) == 0 ? 0 : 2; } catch { }
++            try { AntiAliasing = ProfileStore.Testing ? 1 : PlayerPrefs.GetInt("autobahn.aa2", 1) == 0 ? 0 : 1; } catch { }
++            try { mobile = !ProfileStore.Testing && PlayerPrefs.GetInt("autobahn.mobile", Application.isMobilePlatform ? 1 : 0) == 1; } catch { }
++            if (mobile) Level = 0;
++        }
++
+         public static void BindCamera(Camera camera)
+         {
+             lens = camera;
+             Apply(Level);
+         }
+ 
+-        public static void Cycle() => Apply(Level == 0 ? 2 : 0);
++        // High → Fast → Mobile → High.
++        public static void Cycle()
++        {
++            if (Mobile) SetMobile(false, 2);
++            else if (Level == 0) SetMobile(true, 0);
++            else Apply(0);
++        }
++
++        public static void SetMobile(bool on, int level = 0)
++        {
++            LoadChoice();
++            mobile = on;
++            if (!ProfileStore.Testing)
++                try { PlayerPrefs.SetInt("autobahn.mobile", on ? 1 : 0); } catch { }
++            Apply(on ? 0 : level);
++            // Fewer traffic cars on Mobile (TrafficFlow.PoolSize).
++            var run = RunSession.Active;
++            if (run && run.Traffic) run.Traffic.SetDensity(run.Traffic.Density);
++        }
++
++        // Mobile holds the frame rate at 30 (even pacing, a cool phone); the other presets use
++        // what Boot set up (the display's rate, or free-running for the automated checks).
++        static bool capped;
++        static int savedFrameRate, savedVSync;
++
++        static void FrameRate()
++        {
++            if (mobile && !capped)
++            {
++                capped = true;
++                savedFrameRate = Application.targetFrameRate;
++                savedVSync = QualitySettings.vSyncCount;
++                QualitySettings.vSyncCount = 0;
++                Application.targetFrameRate = 30;
++            }
++            else if (!mobile && capped)
++            {
++                capped = false;
++                QualitySettings.vSyncCount = savedVSync;
++                Application.targetFrameRate = savedFrameRate;
++            }
++        }
+ 
+         // The window was resized or went full screen: the pixel cap depends on its height.
+         public static void Watch()
+@@ -106,34 +162,39 @@ namespace Autobahn
+         {
+             var pipeline = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+             if (pipeline == null) return;
+-            pipeline.renderScale = Mathf.Clamp(baseScale * Adaptive, .45f, 1f);
++            pipeline.renderScale = Mathf.Clamp(baseScale * Adaptive, MinScale, 1f);
+             pipeline.upscalingFilter = pipeline.renderScale < .99f ? UpscalingFilterSelection.FSR : UpscalingFilterSelection.Auto;
+         }
+ 
+         // Distance culling per kind of object, and the GPU-driven renderer with occlusion culling
+         // (buildings hide what is behind them without any baking). Switchable for measurements.
+         public static bool LayerCulling = true, GpuDriven = false;
+-        public static float TreeReach => Level switch { 0 => 300, 1 => 420, 2 => 520, _ => 760 };
+-        public static float PropReach => Level switch { 0 => 170, 1 => 230, 2 => 280, _ => 420 };
++        public static float TreeReach => mobile ? 220 : Level switch { 0 => 300, 1 => 420, 2 => 520, _ => 760 };
++        public static float PropReach => mobile ? 120 : Level switch { 0 => 170, 1 => 230, 2 => 280, _ => 420 };
+         static readonly float[] cull = new float[32];
+ 
+         public static void Apply(int level)
+         {
++            LoadChoice();
+             Level = Mathf.Clamp(level, 0, Names.Length - 1);
++            // Any other level leaves Mobile (it is built on Fast).
++            if (Level != 0) mobile = false;
+             if (!ProfileStore.Testing)
+                 try { PlayerPrefs.SetInt("autobahn.gfx2", Level); } catch { }
++            FrameRate();
+             var pipeline = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+             if (pipeline != null)
+             {
+-                // Lower presets render fewer pixels and let FSR sharpen them back up.
+-                float preset = Level switch { 0 => .85f, 1 => .92f, 2 => 1f, _ => 1f };
++                // Lower presets render fewer pixels and let FSR sharpen them back up (Mobile: 720p,
++                // through MaxHeight).
++                float preset = mobile ? 1f : Level switch { 0 => .85f, 1 => .92f, 2 => 1f, _ => 1f };
+                 // A resolution picked in the settings is drawn exactly: below the window it is
+                 // scaled up (FSR), above it rendered bigger and scaled down (4K on a smaller screen).
+                 int chosen = ScreenResolution.ChosenHeight;
+                 baseScale = chosen > 0
+                     ? ScreenResolution.Scale
+-                    : Mathf.Clamp(Mathf.Min(preset, MaxHeight / Mathf.Max(1, Screen.height)), .5f, 1f);
+-                pipeline.renderScale = chosen > 0 ? Mathf.Clamp(baseScale, .05f, 2f) : Mathf.Clamp(baseScale * Adaptive, .45f, 1f);
++                    : Mathf.Clamp(Mathf.Min(preset, MaxHeight / Mathf.Max(1, Screen.height)), mobile ? MinScale : .5f, 1f);
++                pipeline.renderScale = chosen > 0 ? Mathf.Clamp(baseScale, .05f, 2f) : Mathf.Clamp(baseScale * Adaptive, MinScale, 1f);
+                 lastHeight = Screen.height;
+                 pipeline.upscalingFilter = chosen > 0 && chosen <= 144 ? UpscalingFilterSelection.Point
+                     : pipeline.renderScale < .99f ? UpscalingFilterSelection.FSR : UpscalingFilterSelection.Auto;
+@@ -141,8 +202,8 @@ namespace Autobahn
+                 pipeline.fsrSharpness = .92f;
+                 // Anti-aliasing is done in the image, so multisampling only costs memory bandwidth.
+                 // (Unless the player asked for the strongest anti-aliasing in the settings.)
+-                pipeline.msaaSampleCount = AntiAliasing == 1 ? 4 : 1;
+-                pipeline.shadowDistance = Level switch { 0 => 45, 1 => 80, 2 => 150, _ => 260 };
++                pipeline.msaaSampleCount = AntiAliasing == 1 && !mobile ? 4 : 1;
++                pipeline.shadowDistance = mobile ? 40 : Level switch { 0 => 45, 1 => 80, 2 => 150, _ => 260 };
+                 pipeline.shadowCascadeCount = Level switch { 0 => 1, 1 => 2, 2 => 3, _ => 4 };
+                 pipeline.cascade4Split = new Vector3(.05f, .15f, .38f);
+                 pipeline.mainLightShadowmapResolution = Level switch { 0 => 1024, 1 => 1536, 2 => 2048, _ => 4096 };
+@@ -170,7 +231,7 @@ namespace Autobahn
+                 // SMAA on every preset: FXAA (Fast) smudged every edge and texture. No TAA: it
+                 // softens the whole image and smears at speed.
+                 data.antialiasing = AntiAliasing == 0 ? AntialiasingMode.None : AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+-                data.antialiasingQuality = AntialiasingQuality.High;
++                data.antialiasingQuality = mobile ? AntialiasingQuality.Low : AntialiasingQuality.High;
+                 lens.farClipPlane = FarReach + 60;
+                 System.Array.Clear(cull, 0, cull.Length);
+                 if (LayerCulling)
+@@ -182,7 +243,7 @@ namespace Autobahn
+                 lens.layerCullDistances = cull;
+             }
+ 
+-            QualitySettings.lodBias = Level switch { 0 => .7f, 1 => 1f, 2 => 1.25f, _ => 2.2f };
++            QualitySettings.lodBias = mobile ? .5f : Level switch { 0 => .7f, 1 => 1f, 2 => 1.25f, _ => 2.2f };
+             // Full-size textures and anisotropic filtering everywhere: half-size textures and plain
+             // trilinear filtering blurred roads and walls at an angle (cheap on any GPU today).
+             QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
+diff --git a/Assets/Drive/Scripts/Traffic/TrafficFlow.cs b/Assets/Drive/Scripts/Traffic/TrafficFlow.cs
+index 93257cc..0e9f0da 100644
+--- a/Assets/Drive/Scripts/Traffic/TrafficFlow.cs
++++ b/Assets/Drive/Scripts/Traffic/TrafficFlow.cs
+@@ -61,8 +61,10 @@ namespace Autobahn
+                 BodyStyle.StyleSedan, BodyStyle.Sport, BodyStyle.StyleCar, BodyStyle.LabCoupe, BodyStyle.StyleSport, BodyStyle.Touring,
+                 BodyStyle.StyleSedan, BodyStyle.AudiR8, BodyStyle.StyleJeep, BodyStyle.MilitaryJeep, BodyStyle.StyleCar, BodyStyle.Supercar,
+                 BodyStyle.StyleSedan, BodyStyle.Porsche911};
+-            // Pool: enough for the heaviest setting (road + city), +50 % on the old 72.
+-            for (int i = 0; i < PoolSize; i++)
++            // Pool: 60 cars (it was 108, enough for the heaviest setting everywhere at once), 30 on
++            // Mobile; the density settings share it out between the road and the city.
++            int pool = PoolSize;
++            for (int i = 0; i < pool; i++)
+             {
+                 var go = new GameObject("Civilian " + i);
+                 go.transform.SetParent(transform);
+@@ -82,6 +84,7 @@ namespace Autobahn
+                 float height = string.IsNullOrEmpty(shape.Prefab) ? shape.Top[3] * 1.1f : shape.Height > .5f ? shape.Height * .92f : 1.5f;
+                 box.size = new(shape.Width * .96f, height, shape.Length * .96f);
+                 box.center = new(0, height / 2 + .08f, 0);
++                // Nobody looks inside a car going past: no interior, engine or suspension.
+                 if (string.IsNullOrEmpty(shape.Prefab))
+                 {
+                     foreach (var wheel in art.Wheels)
+@@ -89,15 +92,19 @@ namespace Autobahn
+                         Art.Combine(wheel);
+                         Art.Strip(wheel);
+                     }
++                    Art.DropInside(art.Visual);
+                     Art.Combine(art.Visual);
+                     Art.Strip(art.Visual);
+                 }
+                 else if (shape.ExtraWheels == null && !art.Visual.GetComponentInChildren<SkinnedMeshRenderer>(true))
+                 {
+                     // Imported models: one renderer for the body and one per wheel.
+-                    Art.MergeModel(art.Visual, style.ToString());
+-                    for (int w = 0; w < art.Wheels.Length; w++) Art.MergeModel(art.Wheels[w], style + " wheel " + w);
++                    Art.MergeModel(art.Visual, style.ToString(), true);
++                    for (int w = 0; w < art.Wheels.Length; w++) Art.MergeModel(art.Wheels[w], style + " wheel " + w, true);
+                 }
++                else
++                    Art.DropInside(art.Visual);
++                FarLook(go, shape.Width * .96f, height, shape.Length * .96f, art.PaintColor);
+                 var c = go.AddComponent<TrafficCar>();
+                 c.Init(this);
+                 c.Driver = (Personality)(i % 5);
+@@ -129,7 +136,40 @@ namespace Autobahn
+             }
+         }
+ 
+-        const int PoolSize = 108;
++        // How many traffic cars there are (made once, at start): configurable, fewer on Mobile.
++        public static int DefaultPool = 60, MobilePool = 30;
++        public static int PoolSize => Mathf.Max(1, GraphicsQuality.Mobile ? MobilePool : DefaultPool);
++
++        // From this far a traffic car is drawn as a box in its colour (body and cabin): all that
++        // is seen of it there, for a sliver of the triangles and draw calls of the model.
++        public static float FarLookDistance = 60;
++        static readonly Dictionary<Color, Material> farPaint = new();
++        static Material farGlass;
++
++        static void FarLook(GameObject car, float width, float height, float length, Color colour)
++        {
++            var near = car.GetComponentsInChildren<Renderer>(true);
++            if (near.Length == 0) return;
++            if (!farPaint.TryGetValue(colour, out var paint))
++                farPaint[colour] = paint = Art.Material("Traffic far paint", colour, .3f, .55f);
++            if (!farGlass) farGlass = Art.Material("Traffic far glass", new Color(.05f, .06f, .07f), .2f, .8f);
++            var far = new GameObject("Far look").transform;
++            far.SetParent(car.transform, false);
++            var body = Art.Box(far, "Far body", new Vector3(0, .12f + height * .25f, 0), new Vector3(width, height * .5f, length), paint);
++            var cabin = Art.Box(far, "Far cabin", new Vector3(0, .12f + height * .68f, -length * .04f), new Vector3(width * .84f, height * .4f, length * .52f), farGlass);
++            var boxes = new Renderer[] { body.GetComponent<Renderer>(), cabin.GetComponent<Renderer>() };
++            foreach (var r in boxes)
++            {
++                r.gameObject.layer = car.layer;
++                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
++            }
++            var group = car.AddComponent<LODGroup>();
++            group.SetLODs(new[] { new LOD(.5f, near), new LOD(.001f, boxes) });
++            group.RecalculateBounds();
++            // Screen height of the car at FarLookDistance, with the camera's 60° view.
++            float at = Mathf.Clamp(group.size / (FarLookDistance * 2 * Mathf.Tan(30 * Mathf.Deg2Rad)), .01f, .9f);
++            group.SetLODs(new[] { new LOD(at, near), new LOD(.001f, boxes) });
++        }
+ 
+         float Cruise(TrafficCar c) => c.Driver switch
+         {
+@@ -157,8 +197,11 @@ namespace Autobahn
+                 road = Mathf.RoundToInt((Density == 0 ? 24 : Density == 1 ? 42 : 63) * (1 + .5f * friends));
+                 city = Mathf.RoundToInt((Density == 0 ? 21 : Density == 1 ? 33 : 45) * (1 + .3f * friends));
+             }
+-            road = Mathf.Min(road, Cars.Count);
+-            city = Mathf.Min(city, Cars.Count - road);
++            // A smaller pool (Mobile, or set lower) keeps about a third of it for the city streets.
++            int pool = Mathf.Min(Cars.Count, PoolSize);
++            city = Mathf.Min(city, pool);
++            road = Mathf.Min(road, pool - Mathf.Min(city, Mathf.RoundToInt(pool * .3f)));
++            city = Mathf.Min(city, pool - road);
+             for (int i = 0; i < Cars.Count; i++)
+             {
+                 var c = Cars[i];
+diff --git a/Assets/Drive/Scripts/World/ForestRenderer.cs b/Assets/Drive/Scripts/World/ForestRenderer.cs
+index 968ae9f..baa8efc 100644
+--- a/Assets/Drive/Scripts/World/ForestRenderer.cs
++++ b/Assets/Drive/Scripts/World/ForestRenderer.cs
+@@ -25,6 +25,9 @@ namespace Autobahn
+             public Foliage.Kind Kind;
+             public bool Simple;
+             public int Variant;
++            // A far group's flat stand-in (see Board), and whether this group is one.
++            public int Board = -1;
++            public bool IsBoard;
+             public readonly List<(Mesh, Material)> Parts = new();
+             public readonly List<Matrix4x4> Frame = new();
+             public readonly List<Matrix4x4> Shadowed = new();
+@@ -93,10 +96,121 @@ namespace Autobahn
+             var group = new Group { Kind = kind, Simple = simple, Variant = variant };
+             Foliage.Parts(kind, simple, variant, group.Parts);
+             groups.Add(group);
+-            groupOf[key] = groups.Count - 1;
++            int index = groups.Count - 1;
++            groupOf[key] = index;
++            if (simple) group.Board = Board(group);
++            return index;
++        }
++
++        // --- far trees as flat pictures --------------------------------------------------------
++        // Beyond BillboardRange a tree is two crossed cards (both faces): its crown cut from its
++        // own leaf material, a strip of its bark under it. A dozen triangles where the far model
++        // has sixty or more, and no shadow (only the nearest trees cast one).
++        public static bool Billboards = true;
++        public static float BillboardRange => Mathf.Max(NearRange + 30, GraphicsQuality.Mobile ? 110 : 150);
++        // How often the leaf texture repeats across a crown (denser leaves from afar).
++        public static float BoardTiling = 2;
++        public int DrawnBoards { get; private set; }
++
++        int Board(Group far)
++        {
++            if (far.Parts.Count < 2) return -1;
++            var bounds = new Bounds();
++            bool any = false;
++            foreach (var (mesh, _) in far.Parts)
++                if (mesh)
++                {
++                    if (!any) { bounds = mesh.bounds; any = true; }
++                    else bounds.Encapsulate(mesh.bounds);
++                }
++            var bark = far.Parts[0].Item2;
++            var leaf = far.Parts[1].Item2;
++            if (!any || !leaf || bounds.max.y < .5f) return -1;
++            float h = bounds.max.y, half = Mathf.Max(bounds.extents.x, bounds.extents.z) * .85f;
++            bool conifer = far.Kind == Foliage.Kind.Pine || far.Kind == Foliage.Kind.Spruce;
++            var outline = new List<Vector2>();
++            float trunkTop;
++            if (conifer)
++            {
++                // A cone seen from the side.
++                outline.Add(new Vector2(-half, h * .15f));
++                outline.Add(new Vector2(0, h));
++                outline.Add(new Vector2(half, h * .15f));
++                trunkTop = h * .3f;
++            }
++            else
++            {
++                // A rounded crown on its trunk (a bush: all crown).
++                float bottom = far.Kind == Foliage.Kind.Bush ? 0 : h * .32f;
++                float cy = (h + bottom) / 2, ry = (h - bottom) / 2;
++                for (int k = 0; k < 8; k++)
++                {
++                    float a = (k + .5f) / 8 * Mathf.PI * 2;
++                    outline.Add(new Vector2(Mathf.Cos(a) * half, cy + Mathf.Sin(a) * ry));
++                }
++                trunkTop = far.Kind == Foliage.Kind.Bush ? 0 : h * .45f;
++            }
++            var board = new Group { Kind = far.Kind, Simple = true, Variant = far.Variant, IsBoard = true };
++            if (trunkTop > 0 && bark)
++            {
++                float w = Mathf.Clamp(half * .08f, .12f, .45f);
++                var trunk = new List<Vector2> { new(-w, 0), new(-w, trunkTop), new(w, trunkTop), new(w, 0) };
++                board.Parts.Add((Cards(trunk, 1, "Tree board trunk"), bark));
++            }
++            board.Parts.Add((Cards(outline, BoardTiling, "Tree board crown"), leaf));
++            if (!leaf.enableInstancing) leaf.enableInstancing = true;
++            groups.Add(board);
+             return groups.Count - 1;
+         }
+ 
++        // Two upright cards at right angles, both faces, filled with `outline` (x across, y up)
++        // as a fan from its middle. Normals lean up, so the sky lights both faces alike.
++        static Mesh Cards(List<Vector2> outline, float tiling, string name)
++        {
++            float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
++            var mid = Vector2.zero;
++            foreach (var p in outline)
++            {
++                x0 = Mathf.Min(x0, p.x); x1 = Mathf.Max(x1, p.x);
++                y0 = Mathf.Min(y0, p.y); y1 = Mathf.Max(y1, p.y);
++                mid += p;
++            }
++            mid /= outline.Count;
++            Vector2 UV(Vector2 p) => new((p.x - x0) / Mathf.Max(.01f, x1 - x0) * tiling, (p.y - y0) / Mathf.Max(.01f, y1 - y0) * tiling);
++            var v = new List<Vector3>();
++            var n = new List<Vector3>();
++            var uv = new List<Vector2>();
++            var t = new List<int>();
++            for (int card = 0; card < 2; card++)
++                for (int face = 0; face < 2; face++)
++                {
++                    Vector3 across = card == 0 ? Vector3.right : Vector3.forward;
++                    Vector3 facing = Vector3.Cross(across, Vector3.up) * (face == 0 ? 1 : -1);
++                    Vector3 normal = (facing * .35f + Vector3.up).normalized;
++                    int c = v.Count;
++                    v.Add(across * mid.x + Vector3.up * mid.y); n.Add(normal); uv.Add(UV(mid));
++                    foreach (var p in outline)
++                    {
++                        v.Add(across * p.x + Vector3.up * p.y);
++                        n.Add(normal);
++                        uv.Add(UV(p));
++                    }
++                    for (int k = 0; k < outline.Count; k++)
++                    {
++                        int a = c + 1 + k, b = c + 1 + (k + 1) % outline.Count;
++                        if (face == 0) { t.Add(c); t.Add(a); t.Add(b); }
++                        else { t.Add(c); t.Add(b); t.Add(a); }
++                    }
++                }
++            var mesh = new Mesh { name = name };
++            mesh.SetVertices(v);
++            mesh.SetNormals(n);
++            mesh.SetUVs(0, uv);
++            mesh.SetTriangles(t, 0);
++            mesh.RecalculateBounds();
++            return mesh;
++        }
++
+         // Returns the tile's id for RemoveTile (-1: no trees).
+         public int AddTile(Vector3 centre, List<Plant> plants)
+         {
+@@ -199,8 +313,26 @@ namespace Autobahn
+             foreach (var g in groups) { g.Frame.Clear(); g.Shadowed.Clear(); }
+             float reach = GraphicsQuality.FarReach + 150, nearRange = NearRange, near2 = nearRange * nearRange, shadow2 = ShadowRange * ShadowRange;
+             var c2 = new Vector2(cam.x, cam.z);
+-            int nearCount = 0, farCount = 0;
++            int nearCount = 0, farCount = 0, boardCount = 0;
+             bool everything = RoadWorld.ShowAll;
++            bool boards = Billboards;
++            float boardRange = BillboardRange, board2 = boardRange * boardRange;
++
++            // Beyond the detailed range: the far model, or its flat picture further out.
++            void Far(Tile t, int i, float e)
++            {
++                var far = groups[t.FarGroup[i]];
++                if (boards && far.Board >= 0 && e >= board2)
++                {
++                    groups[far.Board].Frame.Add(t.FarMatrix[i]);
++                    boardCount++;
++                }
++                else
++                {
++                    far.Frame.Add(t.FarMatrix[i]);
++                    farCount++;
++                }
++            }
+ 
+             void Gather(Cell cell)
+             {
+@@ -211,13 +343,14 @@ namespace Autobahn
+                 if (cullBehind && Vector2.Dot(toCell, ahead) < -(BehindMargin + HalfDiagonal)) return;
+                 if (d - HalfDiagonal > nearRange)
+                 {
+-                    // All of it beyond the detailed range: the cheap model for every tree.
++                    // All of it beyond the detailed range: the cheap model for every tree, or
++                    // (all of it further than the pictures start) the picture.
++                    bool allBoards = boards && d - HalfDiagonal > boardRange;
+                     foreach (var (ti, i) in cell.Trees)
+                     {
+                         var t = tiles[ti];
+                         if (t.Down[i]) continue;
+-                        groups[t.FarGroup[i]].Frame.Add(t.FarMatrix[i]);
+-                        farCount++;
++                        Far(t, i, allBoards ? board2 : (t.Spot[i] - c2).sqrMagnitude);
+                     }
+                     return;
+                 }
+@@ -233,11 +366,7 @@ namespace Autobahn
+                         (e < shadow2 ? g.Shadowed : g.Frame).Add(t.NearMatrix[i]);
+                         nearCount++;
+                     }
+-                    else
+-                    {
+-                        groups[t.FarGroup[i]].Frame.Add(t.FarMatrix[i]);
+-                        farCount++;
+-                    }
++                    else Far(t, i, e);
+                 }
+             }
+ 
+@@ -256,6 +385,7 @@ namespace Autobahn
+                     }
+             DrawnNear = nearCount;
+             DrawnFar = farCount;
++            DrawnBoards = boardCount;
+         }
+ 
+         // For a camera rendered by hand (screenshots, the map picture): the trees are drawn only
+diff --git a/Assets/Drive/Scripts/World/GridWorld.cs b/Assets/Drive/Scripts/World/GridWorld.cs
+index 18b38ec..722be9e 100644
+--- a/Assets/Drive/Scripts/World/GridWorld.cs
++++ b/Assets/Drive/Scripts/World/GridWorld.cs
+@@ -305,6 +305,9 @@ namespace Autobahn
+         // handed to another lamp is already dark when it moves: no lamp ever jumps or blinks,
+         // however the camera turns (the old choice followed the camera's facing and flickered).
+         const int PoolSize = 96;
++        // Real lights in use: all of the pool, 16 on Mobile (the rest stay dark; the lamp heads
++        // still glow).
++        static int Lit => GraphicsQuality.Mobile ? 16 : PoolSize;
+         const float LampIntensity = 55, LampRange = 22, Inner = 62, Outer = 112;
+         Transform[] lampOf;
+         float[] level;
+@@ -367,8 +370,9 @@ namespace Autobahn
+                         float d = new Vector2(p.x - lightCentre.x, p.z - lightCentre.z).sqrMagnitude;
+                         if (d < Outer * Outer) near.Add((d, a));
+                     }
+-                    if (near.Count > PoolSize) near.Sort(byDistance);
+-                    for (int i = 0; i < PoolSize && i < near.Count; i++)
++                    int lit = Lit;
++                    if (near.Count > lit) near.Sort(byDistance);
++                    for (int i = 0; i < lit && i < near.Count; i++)
+                         wanted.Add(near[i].t);
+                     poolReach = Outer;
+                     foreach (var a in wanted)

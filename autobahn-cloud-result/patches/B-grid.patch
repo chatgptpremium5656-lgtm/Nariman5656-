@@ -1,0 +1,364 @@
+diff --git a/Assets/Drive/Scripts/World/ForestRenderer.cs b/Assets/Drive/Scripts/World/ForestRenderer.cs
+index a7c2494..968ae9f 100644
+--- a/Assets/Drive/Scripts/World/ForestRenderer.cs
++++ b/Assets/Drive/Scripts/World/ForestRenderer.cs
+@@ -6,8 +6,9 @@ namespace Autobahn
+ {
+     // The island's forests, drawn with GPU instancing instead of one merged mesh per ground tile:
+     // many more trees for the same cost, the detailed purchased model near the camera and its
+-    // cheapest level of detail further out, switched per tile as you drive. The trees are only
+-    // positions (no game objects), grouped by species and variant.
++    // cheapest level of detail further out, switched per tree as you drive. The trees are only
++    // positions (no game objects), grouped by species and variant, and filed in a grid of square
++    // cells: drawing, trunks and searches look only at the cells round the place in question.
+     public sealed class ForestRenderer : MonoBehaviour
+     {
+         public static ForestRenderer Active { get; private set; }
+@@ -36,8 +37,25 @@ namespace Autobahn
+             public Vector2[] Spot;                   // per tree, x/z
+             public Matrix4x4[] NearMatrix, FarMatrix;
+             public bool[] Down;                      // per tree: knocked down (not drawn)
++            public readonly List<Cell> Cells = new(); // where its trees are filed
+         }
+ 
++        // A square of the grid and the trees standing in it (tile slot and index in the tile).
++        public const float CellSize = 64;
++        const float HalfDiagonal = CellSize * .7072f;
++        sealed class Cell
++        {
++            public int X, Z;
++            public Vector2 Centre;
++            public readonly List<(int tile, int index)> Trees = new();
++        }
++        readonly Dictionary<long, Cell> cells = new();
++        int minX = int.MaxValue, maxX = int.MinValue, minZ = int.MaxValue, maxZ = int.MinValue;
++
++        static long CellKey(int x, int z) => ((long)x << 32) | (uint)z;
++        static int CellOf(float v) => Mathf.FloorToInt(v / CellSize);
++        Cell CellAt(int x, int z) => cells.TryGetValue(CellKey(x, z), out var c) ? c : null;
++
+         // Tile slots: a slot is emptied when its ground is unloaded (world streaming) and reused
+         // later, so the numbers the trunks and felled trees keep stay valid.
+         readonly List<Tile> tiles = new();
+@@ -114,6 +132,19 @@ namespace Autobahn
+                 id = tiles.Count;
+                 tiles.Add(tile);
+             }
++            for (int i = 0; i < plants.Count; i++)
++            {
++                int x = CellOf(tile.Spot[i].x), z = CellOf(tile.Spot[i].y);
++                long key = CellKey(x, z);
++                if (!cells.TryGetValue(key, out var cell))
++                {
++                    cells[key] = cell = new Cell { X = x, Z = z, Centre = new Vector2((x + .5f) * CellSize, (z + .5f) * CellSize) };
++                    minX = Mathf.Min(minX, x); maxX = Mathf.Max(maxX, x);
++                    minZ = Mathf.Min(minZ, z); maxZ = Mathf.Max(maxZ, z);
++                }
++                if (cell.Trees.Count == 0 || cell.Trees[cell.Trees.Count - 1].tile != id) tile.Cells.Add(cell);
++                cell.Trees.Add((id, i));
++            }
+             if (!logged)
+             {
+                 logged = true;
+@@ -138,6 +169,11 @@ namespace Autobahn
+                 }
+             foreach (var c in trunks)
+                 if (c && c.gameObject.activeSelf && c.GetComponent<Trunk>().Tile == id) c.gameObject.SetActive(false);
++            foreach (var cell in tiles[id].Cells)
++            {
++                cell.Trees.RemoveAll(r => r.tile == id);
++                if (cell.Trees.Count == 0) cells.Remove(CellKey(cell.X, cell.Z));
++            }
+             tiles[id] = null;
+             freeSlots.Push(id);
+             dirty = true;
+@@ -164,20 +200,30 @@ namespace Autobahn
+             float reach = GraphicsQuality.FarReach + 150, nearRange = NearRange, near2 = nearRange * nearRange, shadow2 = ShadowRange * ShadowRange;
+             var c2 = new Vector2(cam.x, cam.z);
+             int nearCount = 0, farCount = 0;
+-            foreach (var t in tiles)
++            bool everything = RoadWorld.ShowAll;
++
++            void Gather(Cell cell)
+             {
+-                if (t == null) continue;
+-                float d = new Vector2(t.Centre.x - cam.x, t.Centre.z - cam.z).magnitude;
+-                if (d > reach && !RoadWorld.ShowAll) continue;
+-                if (cullBehind && Vector2.Dot(new Vector2(t.Centre.x - cam.x, t.Centre.z - cam.z), ahead) < -(BehindMargin + 160)) continue;
+-                if (d > nearRange + 150)
++                var toCell = cell.Centre - c2;
++                float d = toCell.magnitude;
++                if (d > reach && !everything) return;
++                // The whole cell well behind the camera (its trees beyond their shadows' reach too).
++                if (cullBehind && Vector2.Dot(toCell, ahead) < -(BehindMargin + HalfDiagonal)) return;
++                if (d - HalfDiagonal > nearRange)
+                 {
+-                    for (int i = 0; i < t.FarGroup.Length; i++) if (!t.Down[i]) groups[t.FarGroup[i]].Frame.Add(t.FarMatrix[i]);
+-                    farCount += t.FarGroup.Length;
+-                    continue;
++                    // All of it beyond the detailed range: the cheap model for every tree.
++                    foreach (var (ti, i) in cell.Trees)
++                    {
++                        var t = tiles[ti];
++                        if (t.Down[i]) continue;
++                        groups[t.FarGroup[i]].Frame.Add(t.FarMatrix[i]);
++                        farCount++;
++                    }
++                    return;
+                 }
+-                for (int i = 0; i < t.Spot.Length; i++)
++                foreach (var (ti, i) in cell.Trees)
+                 {
++                    var t = tiles[ti];
+                     if (t.Down[i]) continue;
+                     float e = (t.Spot[i] - c2).sqrMagnitude;
+                     if (cullBehind && e > shadow2 && Vector2.Dot(t.Spot[i] - c2, ahead) < -BehindMargin) continue;
+@@ -194,6 +240,20 @@ namespace Autobahn
+                     }
+                 }
+             }
++
++            // Only the cells within reach; when that window holds more cells than there are
++            // (a huge reach, the map picture) it is cheaper to go through the filled ones.
++            int r = Mathf.CeilToInt(reach / CellSize) + 1;
++            int cx = CellOf(cam.x), cz = CellOf(cam.z);
++            if (everything || (2L * r + 1) * (2L * r + 1) > cells.Count)
++                foreach (var cell in cells.Values) Gather(cell);
++            else
++                for (int x = cx - r; x <= cx + r; x++)
++                    for (int z = cz - r; z <= cz + r; z++)
++                    {
++                        var cell = CellAt(x, z);
++                        if (cell != null) Gather(cell);
++                    }
+             DrawnNear = nearCount;
+             DrawnFar = farCount;
+         }
+@@ -276,22 +336,27 @@ namespace Autobahn
+             foreach (var f in focus)
+             {
+                 var f2 = new Vector2(f.x, f.z);
+-                for (int ti = 0; ti < tiles.Count && used < trunks.Count; ti++)
+-                {
+-                    var t = tiles[ti];
+-                    if (t == null || new Vector2(t.Centre.x - f.x, t.Centre.z - f.z).sqrMagnitude > 175 * 175) continue;
+-                    for (int i = 0; i < t.Spot.Length && used < trunks.Count; i++)
++                int x0 = CellOf(f.x - TrunkReach), x1 = CellOf(f.x + TrunkReach);
++                int z0 = CellOf(f.z - TrunkReach), z1 = CellOf(f.z + TrunkReach);
++                for (int x = x0; x <= x1; x++)
++                    for (int z = z0; z <= z1; z++)
+                     {
+-                        if (t.Down[i] || (t.Spot[i] - f2).sqrMagnitude > TrunkReach * TrunkReach) continue;
+-                        // Bushes have no trunk: an invisible post inside them stopped cars and people.
+-                        if (groups[t.NearGroup[i]].Kind == Foliage.Kind.Bush) continue;
+-                        var c = trunks[used++];
+-                        c.transform.position = t.NearMatrix[i].GetColumn(3);
+-                        var tag = c.GetComponent<Trunk>();
+-                        tag.Tile = ti; tag.Index = i;
+-                        if (!c.gameObject.activeSelf) c.gameObject.SetActive(true);
++                        var cell = CellAt(x, z);
++                        if (cell == null) continue;
++                        foreach (var (ti, i) in cell.Trees)
++                        {
++                            if (used >= trunks.Count) break;
++                            var t = tiles[ti];
++                            if (t.Down[i] || (t.Spot[i] - f2).sqrMagnitude > TrunkReach * TrunkReach) continue;
++                            // Bushes have no trunk: an invisible post inside them stopped cars and people.
++                            if (groups[t.NearGroup[i]].Kind == Foliage.Kind.Bush) continue;
++                            var c = trunks[used++];
++                            c.transform.position = t.NearMatrix[i].GetColumn(3);
++                            var tag = c.GetComponent<Trunk>();
++                            tag.Tile = ti; tag.Index = i;
++                            if (!c.gameObject.activeSelf) c.gameObject.SetActive(true);
++                        }
+                     }
+-                }
+             }
+             for (int k = used; k < trunks.Count; k++)
+                 if (trunks[k].gameObject.activeSelf) trunks[k].gameObject.SetActive(false);
+@@ -375,17 +440,21 @@ namespace Autobahn
+             int bestTile = -1, bestIndex = -1;
+             float best = within * within;
+             var a2 = new Vector2(at.x, at.z);
+-            for (int ti = 0; ti < tiles.Count; ti++)
+-            {
+-                var t = tiles[ti];
+-                if (t == null || new Vector2(t.Centre.x - at.x, t.Centre.z - at.z).sqrMagnitude > 200 * 200) continue;
+-                for (int i = 0; i < t.Spot.Length; i++)
++            int x0 = CellOf(at.x - within), x1 = CellOf(at.x + within);
++            int z0 = CellOf(at.z - within), z1 = CellOf(at.z + within);
++            for (int x = x0; x <= x1; x++)
++                for (int z = z0; z <= z1; z++)
+                 {
+-                    if (t.Down[i]) continue;
+-                    float d = (t.Spot[i] - a2).sqrMagnitude;
+-                    if (d < best) { best = d; bestTile = ti; bestIndex = i; }
++                    var cell = CellAt(x, z);
++                    if (cell == null) continue;
++                    foreach (var (ti, i) in cell.Trees)
++                    {
++                        var t = tiles[ti];
++                        if (t.Down[i]) continue;
++                        float d = (t.Spot[i] - a2).sqrMagnitude;
++                        if (d < best) { best = d; bestTile = ti; bestIndex = i; }
++                    }
+                 }
+-            }
+             if (bestTile < 0) return false;
+             Fell(bestTile, bestIndex, push);
+             return true;
+@@ -405,18 +474,47 @@ namespace Autobahn
+             f.dirty = true;
+         }
+ 
+-        // The nearest standing tree to p (automated checks).
++        // The nearest standing tree to p (automated checks): rings of cells outwards, until a
++        // ring is further away than the best tree found.
+         public bool Nearest(Vector3 p, out Vector3 at)
+         {
+             at = default;
+             float best = float.MaxValue;
+-            foreach (var t in tiles)
+-                for (int i = 0; t != null && i < t.Spot.Length; i++)
++            if (cells.Count == 0) return false;
++            var p2 = new Vector2(p.x, p.z);
++            Vector3 found = default;
++            void Look(int x, int z)
++            {
++                var cell = CellAt(x, z);
++                if (cell == null) return;
++                foreach (var (ti, i) in cell.Trees)
+                 {
++                    var t = tiles[ti];
+                     if (t.Down[i]) continue;
+-                    float d = (t.Spot[i] - new Vector2(p.x, p.z)).sqrMagnitude;
+-                    if (d < best) { best = d; at = t.NearMatrix[i].GetColumn(3); }
++                    float d = (t.Spot[i] - p2).sqrMagnitude;
++                    if (d < best) { best = d; found = t.NearMatrix[i].GetColumn(3); }
++                }
++            }
++            int cx = CellOf(p.x), cz = CellOf(p.z);
++            int rings = Mathf.Max(Mathf.Max(cx - minX, maxX - cx), Mathf.Max(cz - minZ, maxZ - cz));
++            for (int ring = 0; ring <= rings; ring++)
++            {
++                // Every tree in this ring is at least (ring - 1) cells away.
++                float closest = Mathf.Max(0, ring - 1) * CellSize;
++                if (closest * closest > best) break;
++                if (ring == 0) { Look(cx, cz); continue; }
++                for (int k = -ring; k <= ring; k++)
++                {
++                    Look(cx + k, cz - ring);
++                    Look(cx + k, cz + ring);
+                 }
++                for (int k = -ring + 1; k <= ring - 1; k++)
++                {
++                    Look(cx - ring, cz + k);
++                    Look(cx + ring, cz + k);
++                }
++            }
++            at = found;
+             return best < float.MaxValue;
+         }
+ 
+diff --git a/Assets/Drive/Scripts/World/Knockable.cs b/Assets/Drive/Scripts/World/Knockable.cs
+index 50f1a3b..18f45f1 100644
+--- a/Assets/Drive/Scripts/World/Knockable.cs
++++ b/Assets/Drive/Scripts/World/Knockable.cs
+@@ -37,7 +37,45 @@ namespace Autobahn
+         public bool Loose => body != null;
+ 
+         static readonly List<Knockable> loose = new();
+-        static readonly List<Knockable> all = new();
++
++        // Every prop filed by where it was put up, in square cells: finding one by place, or all
++        // those round a point, looks at a few cells instead of every prop on the island.
++        public const float CellSize = 32;
++        static readonly Dictionary<long, List<Knockable>> grid = new();
++        long cell;
++        bool filed;
++
++        static long CellKey(int x, int z) => ((long)x << 32) | (uint)z;
++        static int CellOf(float v) => Mathf.FloorToInt(v / CellSize);
++
++        void File()
++        {
++            var p = transform.position;
++            cell = CellKey(CellOf(p.x), CellOf(p.z));
++            if (!grid.TryGetValue(cell, out var list)) grid[cell] = list = new List<Knockable>();
++            list.Add(this);
++            filed = true;
++        }
++
++        void Unfile()
++        {
++            if (!filed) return;
++            filed = false;
++            if (!grid.TryGetValue(cell, out var list)) return;
++            list.Remove(this);
++            if (list.Count == 0) grid.Remove(cell);
++        }
++
++        // Props filed within `radius` of `at` (by where they were put up), added to `into`.
++        public static void Near(Vector3 at, float radius, List<Knockable> into)
++        {
++            int x0 = CellOf(at.x - radius), x1 = CellOf(at.x + radius);
++            int z0 = CellOf(at.z - radius), z1 = CellOf(at.z + radius);
++            for (int x = x0; x <= x1; x++)
++                for (int z = z0; z <= z1; z++)
++                    if (grid.TryGetValue(CellKey(x, z), out var list))
++                        into.AddRange(list);
++        }
+ 
+         // Online: pieces are identified by what they are and where they stand.
+         public static int KindKey(string name)
+@@ -54,13 +92,26 @@ namespace Autobahn
+         {
+             Knockable best = null;
+             float bestD = within * within;
+-            for (int i = all.Count - 1; i >= 0; i--)
++            void Check(List<Knockable> list)
+             {
+-                var k = all[i];
+-                if (!k) { all.RemoveAt(i); continue; }
+-                float d = (k.transform.position - at).sqrMagnitude;
+-                if (d < bestD && KindKey(k.name) == key) { best = k; bestD = d; }
++                foreach (var k in list)
++                {
++                    if (!k) continue;
++                    float d = (k.transform.position - at).sqrMagnitude;
++                    if (d < bestD && KindKey(k.name) == key) { best = k; bestD = d; }
++                }
+             }
++            int x0 = CellOf(at.x - within), x1 = CellOf(at.x + within);
++            int z0 = CellOf(at.z - within), z1 = CellOf(at.z + within);
++            for (int x = x0; x <= x1; x++)
++                for (int z = z0; z <= z1; z++)
++                    if (grid.TryGetValue(CellKey(x, z), out var list))
++                        Check(list);
++            // The endless city moves its tiles (and their props) along with the car: there a
++            // prop is no longer in the cell it was filed in, so look at all of them.
++            if (!best && Route.Endless)
++                foreach (var list in grid.Values)
++                    Check(list);
+             return best;
+         }
+         static KnockHub hub;
+@@ -122,9 +173,7 @@ namespace Autobahn
+                 k.anchorHome = anchor.localPosition;
+             }
+             Count++;
+-            // Props of unloaded tiles leave empty entries behind: cleared now and then.
+-            if (all.Count >= 1024 && (all.Count & 1023) == 0) all.RemoveAll(x => !x);
+-            all.Add(k);
++            k.File();
+             if (!hub)
+             {
+                 hub = new GameObject("Knockables").AddComponent<KnockHub>();
+@@ -306,6 +355,7 @@ namespace Autobahn
+         void OnDestroy()
+         {
+             loose.Remove(this);
++            Unfile();
+             // Its tile was unloaded (world streaming): the count is of props that exist.
+             Count--;
+         }

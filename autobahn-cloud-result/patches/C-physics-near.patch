@@ -1,0 +1,556 @@
+diff --git a/Assets/Drive/Scripts/World/Airplane.cs b/Assets/Drive/Scripts/World/Airplane.cs
+index 5c7d7a3..492e446 100644
+--- a/Assets/Drive/Scripts/World/Airplane.cs
++++ b/Assets/Drive/Scripts/World/Airplane.cs
+@@ -387,6 +387,13 @@ namespace Autobahn
+                 return;
+             }
+             if (Remote) { Remote = false; Body.isKinematic = false; }
++            // Parked, whole and nobody near (the players online too, not only this camera):
++            // asleep, without even the ground checks below.
++            if (!Flown && !Wrecked && Body.linearVelocity.sqrMagnitude < .09f && !PhysicsRange.PlayerNear(transform.position, 250))
++            {
++                if (!Body.IsSleeping()) Body.Sleep();
++                return;
++            }
+ 
+             float dt = Time.fixedDeltaTime;
+             groundHit = default;
+@@ -410,12 +417,6 @@ namespace Autobahn
+                 if (waterDepth < 6) Body.AddForce(Vector3.up * Mass * 7f);
+                 return;
+             }
+-            // Parked and nobody near: asleep.
+-            if (!Flown && speed < .3f && !Wrecked)
+-            {
+-                var cam = Camera.main;
+-                if (!cam || (cam.transform.position - transform.position).sqrMagnitude > 250 * 250) { if (!Body.IsSleeping()) Body.Sleep(); return; }
+-            }
+ 
+             Vector3 local = transform.InverseTransformDirection(v);
+             float aoa = speed > 2 ? Mathf.Atan2(-local.y, Mathf.Max(.1f, local.z)) : 0;
+diff --git a/Assets/Drive/Scripts/World/Boat.cs b/Assets/Drive/Scripts/World/Boat.cs
+index b4ef790..f590348 100644
+--- a/Assets/Drive/Scripts/World/Boat.cs
++++ b/Assets/Drive/Scripts/World/Boat.cs
+@@ -201,9 +201,9 @@ namespace Autobahn
+                 return;
+             }
+             if (Remote) { Remote = false; Body.isKinematic = false; }
+-            // Far from everybody and moored: at rest, no simulation.
+-            var cam = Camera.main;
+-            bool near = Driven || cam && (cam.transform.position - transform.position).sqrMagnitude < 300 * 300 || Body.linearVelocity.sqrMagnitude > .5f;
++            // Far from everybody (the players online too, not only this camera) and moored: at
++            // rest, no simulation.
++            bool near = Driven || Body.linearVelocity.sqrMagnitude > .5f || PhysicsRange.PlayerNear(transform.position, 300);
+             if (!near && !Wrecked) { if (!Body.IsSleeping()) Body.Sleep(); return; }
+ 
+             float dt = Time.fixedDeltaTime;
+diff --git a/Assets/Drive/Scripts/World/CellGrid.cs b/Assets/Drive/Scripts/World/CellGrid.cs
+new file mode 100644
+index 0000000..0d858ec
+--- /dev/null
++++ b/Assets/Drive/Scripts/World/CellGrid.cs
+@@ -0,0 +1,123 @@
++using System.Collections.Generic;
++using UnityEngine;
++
++namespace Autobahn
++{
++    // Things filed by where they stand, in square cells: finding them by place looks at a few
++    // cells instead of everything. With a switch, their physics is on only in the cells some
++    // place of PhysicsRange reaches (street props, parked cars); the endless city moves its tiles
++    // with the car, so there everything stays on.
++    public sealed class CellGrid<T> where T : class
++    {
++        readonly float size;
++        readonly System.Action<T, bool> switcher;
++        readonly Dictionary<long, List<T>> cells = new();
++        HashSet<long> awake = new(), next = new();
++        int stamp = -1;
++        bool everywhere;
++
++        public CellGrid(float size, System.Action<T, bool> switcher = null)
++        {
++            this.size = size;
++            this.switcher = switcher;
++        }
++
++        public int Cells => cells.Count;
++        public int Awake => everywhere ? cells.Count : awake.Count;
++
++        static long Key(int x, int z) => ((long)x << 32) | (uint)z;
++        int CellOf(float v) => Mathf.FloorToInt(v / size);
++        public long KeyOf(Vector3 p) => Key(CellOf(p.x), CellOf(p.z));
++
++        // Files `item` standing at `at`; returns its cell for Remove. Its physics starts on or off.
++        public long Add(T item, Vector3 at)
++        {
++            long key = KeyOf(at);
++            if (!cells.TryGetValue(key, out var list)) cells[key] = list = new List<T>();
++            list.Add(item);
++            if (switcher != null)
++            {
++                bool on = IsOn(key);
++                if (!on && PhysicsRange.Near(at))
++                {
++                    // Built right by a player: the whole cell wakes up now, not at the next look.
++                    awake.Add(key);
++                    foreach (var other in list) switcher(other, true);
++                }
++                else switcher(item, on);
++            }
++            return key;
++        }
++
++        public void Remove(T item, long key)
++        {
++            if (!cells.TryGetValue(key, out var list)) return;
++            list.Remove(item);
++            if (list.Count == 0) cells.Remove(key);
++        }
++
++        public bool IsOn(long key) => everywhere || awake.Contains(key);
++
++        // Everything filed in the cells within `radius` of `at` (callers check the exact distance).
++        public void Near(Vector3 at, float radius, List<T> into)
++        {
++            int x0 = CellOf(at.x - radius), x1 = CellOf(at.x + radius);
++            int z0 = CellOf(at.z - radius), z1 = CellOf(at.z + radius);
++            for (int x = x0; x <= x1; x++)
++                for (int z = z0; z <= z1; z++)
++                    if (cells.TryGetValue(Key(x, z), out var list))
++                        into.AddRange(list);
++        }
++
++        public void All(List<T> into)
++        {
++            foreach (var list in cells.Values) into.AddRange(list);
++        }
++
++        // Called every frame and physics step; switches cells when PhysicsRange looked again.
++        public void Switch()
++        {
++            if (switcher == null) return;
++            PhysicsRange.Update();
++            if (stamp == PhysicsRange.Stamp) return;
++            stamp = PhysicsRange.Stamp;
++            bool every = Route.Endless;
++            if (every != everywhere)
++            {
++                everywhere = every;
++                foreach (var list in cells.Values)
++                    foreach (var item in list) switcher(item, every);
++                awake.Clear();
++            }
++            if (everywhere) return;
++            next.Clear();
++            foreach (var p in PhysicsRange.Points)
++            {
++                float r = p.w;
++                int x0 = CellOf(p.x - r), x1 = CellOf(p.x + r);
++                int z0 = CellOf(p.z - r), z1 = CellOf(p.z + r);
++                for (int x = x0; x <= x1; x++)
++                    for (int z = z0; z <= z1; z++)
++                    {
++                        long key = Key(x, z);
++                        if (!cells.ContainsKey(key)) continue;
++                        // Nearest point of the cell to the place.
++                        float dx = Mathf.Max(x * size - p.x, 0, p.x - (x + 1) * size);
++                        float dz = Mathf.Max(z * size - p.z, 0, p.z - (z + 1) * size);
++                        if (dx * dx + dz * dz <= r * r) next.Add(key);
++                    }
++            }
++            foreach (var key in awake)
++                if (!next.Contains(key)) Set(key, false);
++            foreach (var key in next)
++                if (!awake.Contains(key)) Set(key, true);
++            (awake, next) = (next, awake);
++        }
++
++        void Set(long key, bool on)
++        {
++            if (!cells.TryGetValue(key, out var list)) return;
++            foreach (var item in list) switcher(item, on);
++        }
++    }
++}
+diff --git a/Assets/Drive/Scripts/World/CellGrid.cs.meta b/Assets/Drive/Scripts/World/CellGrid.cs.meta
+new file mode 100644
+index 0000000..f41c8d5
+--- /dev/null
++++ b/Assets/Drive/Scripts/World/CellGrid.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 3664e831d37d42bbb7e0a2953accdf35
+\ No newline at end of file
+diff --git a/Assets/Drive/Scripts/World/Knockable.cs b/Assets/Drive/Scripts/World/Knockable.cs
+index 18f45f1..159755b 100644
+--- a/Assets/Drive/Scripts/World/Knockable.cs
++++ b/Assets/Drive/Scripts/World/Knockable.cs
+@@ -39,21 +39,18 @@ namespace Autobahn
+         static readonly List<Knockable> loose = new();
+ 
+         // Every prop filed by where it was put up, in square cells: finding one by place, or all
+-        // those round a point, looks at a few cells instead of every prop on the island.
++        // those round a point, looks at a few cells instead of every prop on the island. Standing
++        // props far from every player have their collider off (PhysicsRange): thousands of
++        // bins, signs, lamps and guardrail sections that nobody can touch.
+         public const float CellSize = 32;
+-        static readonly Dictionary<long, List<Knockable>> grid = new();
++        static readonly CellGrid<Knockable> grid = new(CellSize, (k, on) => k.SetCollider(on));
+         long cell;
+         bool filed;
+-
+-        static long CellKey(int x, int z) => ((long)x << 32) | (uint)z;
+-        static int CellOf(float v) => Mathf.FloorToInt(v / CellSize);
++        public static int PhysicsCells => grid.Awake;
+ 
+         void File()
+         {
+-            var p = transform.position;
+-            cell = CellKey(CellOf(p.x), CellOf(p.z));
+-            if (!grid.TryGetValue(cell, out var list)) grid[cell] = list = new List<Knockable>();
+-            list.Add(this);
++            cell = grid.Add(this, transform.position);
+             filed = true;
+         }
+ 
+@@ -61,22 +58,18 @@ namespace Autobahn
+         {
+             if (!filed) return;
+             filed = false;
+-            if (!grid.TryGetValue(cell, out var list)) return;
+-            list.Remove(this);
+-            if (list.Count == 0) grid.Remove(cell);
++            grid.Remove(this, cell);
+         }
+ 
+-        // Props filed within `radius` of `at` (by where they were put up), added to `into`.
+-        public static void Near(Vector3 at, float radius, List<Knockable> into)
++        // Standing, its collider only while a player is near; loose, it always has one.
++        void SetCollider(bool on)
+         {
+-            int x0 = CellOf(at.x - radius), x1 = CellOf(at.x + radius);
+-            int z0 = CellOf(at.z - radius), z1 = CellOf(at.z + radius);
+-            for (int x = x0; x <= x1; x++)
+-                for (int z = z0; z <= z1; z++)
+-                    if (grid.TryGetValue(CellKey(x, z), out var list))
+-                        into.AddRange(list);
++            if (box && !Loose) box.enabled = on;
+         }
+ 
++        // Props filed within `radius` of `at` (by where they were put up), added to `into`.
++        public static void Near(Vector3 at, float radius, List<Knockable> into) => grid.Near(at, radius, into);
++
+         // Online: pieces are identified by what they are and where they stand.
+         public static int KindKey(string name)
+         {
+@@ -88,6 +81,8 @@ namespace Autobahn
+             }
+         }
+ 
++        static readonly List<Knockable> found = new();
++
+         public static Knockable FindNear(int key, Vector3 at, float within)
+         {
+             Knockable best = null;
+@@ -101,17 +96,17 @@ namespace Autobahn
+                     if (d < bestD && KindKey(k.name) == key) { best = k; bestD = d; }
+                 }
+             }
+-            int x0 = CellOf(at.x - within), x1 = CellOf(at.x + within);
+-            int z0 = CellOf(at.z - within), z1 = CellOf(at.z + within);
+-            for (int x = x0; x <= x1; x++)
+-                for (int z = z0; z <= z1; z++)
+-                    if (grid.TryGetValue(CellKey(x, z), out var list))
+-                        Check(list);
++            found.Clear();
++            grid.Near(at, within, found);
++            Check(found);
+             // The endless city moves its tiles (and their props) along with the car: there a
+             // prop is no longer in the cell it was filed in, so look at all of them.
+             if (!best && Route.Endless)
+-                foreach (var list in grid.Values)
+-                    Check(list);
++            {
++                found.Clear();
++                grid.All(found);
++                Check(found);
++            }
+             return best;
+         }
+         static KnockHub hub;
+@@ -288,6 +283,7 @@ namespace Autobahn
+             Knocked++;
+             foreach (var (batch, first, length) in slots) batch.Hide(first, length);
+             foreach (var r in own) if (r) r.enabled = true;
++            box.enabled = true;
+             box.isTrigger = false;
+             // Loose debris does not touch the traffic (a bin lying on the road threw passing
+             // cars onto the pavement); the player's car, people and the ground still hit it.
+@@ -316,6 +312,7 @@ namespace Autobahn
+             transform.localPosition = homePosition;
+             transform.localRotation = homeRotation;
+             box.isTrigger = !Solid;
++            box.enabled = !filed || grid.IsOn(cell);
+             gameObject.layer = 0;
+             foreach (var (batch, first, length) in slots)
+             {
+@@ -335,6 +332,8 @@ namespace Autobahn
+             loose.Clear();
+         }
+ 
++        internal static void SwitchPhysics() => grid.Switch();
++
+         // Loose props go back once the driver is well away and at least a while has passed.
+         internal static void Tidy()
+         {
+@@ -389,8 +388,12 @@ namespace Autobahn
+     {
+         float next;
+ 
++        // Before physics too: a car put down next to a prop finds it solid on its first step.
++        void FixedUpdate() => Knockable.SwitchPhysics();
++
+         void Update()
+         {
++            Knockable.SwitchPhysics();
+             if (Time.time < next) return;
+             next = Time.time + 1;
+             Knockable.Tidy();
+diff --git a/Assets/Drive/Scripts/World/ParkedCarBody.cs b/Assets/Drive/Scripts/World/ParkedCarBody.cs
+index 52f9f26..8793bb8 100644
+--- a/Assets/Drive/Scripts/World/ParkedCarBody.cs
++++ b/Assets/Drive/Scripts/World/ParkedCarBody.cs
+@@ -24,6 +24,7 @@ namespace Autobahn
+         public int Hits { get; private set; }
+ 
+         Rigidbody body;
++        BoxCollider box;
+         Transform home;
+         Vector3 homePosition, homeTileAt;
+         Quaternion homeRotation;
+@@ -40,8 +41,11 @@ namespace Autobahn
+             Art.Strip(parked);
+             var car = parked.gameObject.AddComponent<ParkedCarBody>();
+             car.enabled = false;
++            car.box = parked.GetComponent<BoxCollider>();
+             parked.gameObject.SetActive(false);
+             pending.Add(car);
++            car.cell = grid.Add(car, parked.position);
++            car.filed = true;
+             if (!hub)
+             {
+                 hub = new GameObject("Parked cars").AddComponent<ParkedCarBody>();
+@@ -49,6 +53,24 @@ namespace Autobahn
+             }
+         }
+ 
++        // Every parked car filed by its bay: standing in a bay far from every player it has no
++        // collider (PhysicsRange); once shoved about it keeps one until it is back.
++        static readonly CellGrid<ParkedCarBody> grid = new(64, (c, on) => c.SetCollider(on));
++        long cell;
++        bool filed;
++        public static int PhysicsCells => grid.Awake;
++
++        void SetCollider(bool on)
++        {
++            if (box && !body) box.enabled = on;
++        }
++
++        void OnDestroy()
++        {
++            if (filed) grid.Remove(this, cell);
++            filed = false;
++        }
++
+         // Puts every car that was knocked about back in its bay (a new run).
+         public static void RestoreAll()
+         {
+@@ -129,6 +151,7 @@ namespace Autobahn
+             }
+             // Off the tile's compound body, so it moves on its own.
+             transform.SetParent(null, true);
++            if (box) box.enabled = true;
+             body = gameObject.AddComponent<Rigidbody>();
+             body.mass = Mass;
+             body.interpolation = RigidbodyInterpolation.Interpolate;
+@@ -159,12 +182,20 @@ namespace Autobahn
+             transform.localPosition = homePosition;
+             transform.localRotation = homeRotation;
+             home = null;
++            if (box) box.enabled = !filed || grid.IsOn(cell);
++        }
++
++        // Before physics too: a car put down next to a parked one finds it solid on its first step.
++        void FixedUpdate()
++        {
++            if (isHub) grid.Switch();
+         }
+ 
+         void Update()
+         {
+             if (isHub)
+             {
++                grid.Switch();
+                 // Tiles and chunks built last frame have merged their meshes by now.
+                 if (pending.Count == 0) return;
+                 foreach (var car in pending)
+diff --git a/Assets/Drive/Scripts/World/PhysicsRange.cs b/Assets/Drive/Scripts/World/PhysicsRange.cs
+new file mode 100644
+index 0000000..7927535
+--- /dev/null
++++ b/Assets/Drive/Scripts/World/PhysicsRange.cs
+@@ -0,0 +1,142 @@
++using System.Collections.Generic;
++using UnityEngine;
++
++namespace Autobahn
++{
++    // Where physics is needed: round the players (the local car and person, friends online in
++    // their cars, on foot, in planes and boats), where the local person on foot is aiming, and
++    // round anything about to blow up (a missile in the air, a falling bomb, a thrown one). Street
++    // props and parked cars further away keep their looks but not their colliders (CellGrid);
++    // boats and planes nobody is near sleep.
++    public static class PhysicsRange
++    {
++        public const float Radius = 120;
++        // How often the places are looked at again; a jump (a teleport, a new run) at once.
++        public const float Every = .25f;
++        const float JumpDistance = 30;
++
++        // x, y, z and radius of every place.
++        static readonly List<Vector4> points = new();
++        static readonly List<Vector3> players = new(), previous = new(), people = new();
++        static readonly List<Vector4> extra = new();
++        static float nextTick, nextScan;
++        static int frame = -1;
++        static float fixedAt = -1;
++
++        public static IReadOnlyList<Vector4> Points => points;
++        // Changes whenever the places were looked at again (the grids switch then).
++        public static int Stamp { get; private set; }
++
++        // Cheap: a handful of positions, once per frame and physics step.
++        public static void Update()
++        {
++            if (frame == Time.frameCount && fixedAt == Time.fixedTime) return;
++            frame = Time.frameCount;
++            fixedAt = Time.fixedTime;
++            Players();
++            bool jumped = players.Count != previous.Count;
++            foreach (var p in players)
++            {
++                float best = float.MaxValue;
++                foreach (var q in previous) best = Mathf.Min(best, (p - q).sqrMagnitude);
++                if (best > JumpDistance * JumpDistance) jumped = true;
++            }
++            if (!jumped && Time.unscaledTime < nextTick) return;
++            nextTick = Time.unscaledTime + Every;
++            previous.Clear();
++            previous.AddRange(players);
++            if (Time.unscaledTime >= nextScan)
++            {
++                nextScan = Time.unscaledTime + Every;
++                Extra();
++            }
++            points.Clear();
++            foreach (var p in players) points.Add(new Vector4(p.x, p.y, p.z, Radius));
++            points.AddRange(extra);
++            Stamp++;
++        }
++
++        static void Players()
++        {
++            players.Clear();
++            var run = RunSession.Active;
++            if (run && run.Player) players.Add(run.Player.transform.position);
++            var foot = FootPlayer.Active;
++            if (foot && foot.InPlane) players.Add(foot.InPlane.transform.position);
++            // The local person and friends walking about.
++            Net.FootNet.People(people);
++            players.AddRange(people);
++            if (Net.CoopNet.Online && Net.CoopNet.Active != null)
++                foreach (var car in Net.CoopNet.Active.Remotes.Values)
++                    if (car && car.HasState) players.Add(car.transform.position);
++            // Friends flying or sailing (their planes and boats follow their games here).
++            foreach (var plane in Airplane.All)
++                if (plane && plane.Flown) players.Add(plane.transform.position);
++            foreach (var boat in Boat.All)
++                if (boat && boat.Driven) players.Add(boat.transform.position);
++        }
++
++        // Things about to hit something far from the players.
++        static void Extra()
++        {
++            extra.Clear();
++            // A missile flies a couple of hundred metres between two looks: the stretch ahead.
++            foreach (var m in Object.FindObjectsByType<Missile>(FindObjectsSortMode.None))
++            {
++                Vector3 p = m.transform.position, f = m.transform.forward;
++                for (int k = 0; k < 4; k++)
++                {
++                    Vector3 a = p + f * (k * 80);
++                    extra.Add(new Vector4(a.x, a.y, a.z, 60));
++                }
++            }
++            // A falling bomb, and its blast for the moment it knocks everything round it down.
++            foreach (var n in Object.FindObjectsByType<Nuke>(FindObjectsSortMode.None))
++            {
++                Vector3 p = n.transform.position;
++                extra.Add(new Vector4(p.x, p.y, p.z, NukeBlast.KnockRadius + 80));
++            }
++            foreach (var n in Object.FindObjectsByType<NukeBlast>(FindObjectsSortMode.None))
++            {
++                Vector3 p = n.transform.position;
++                extra.Add(new Vector4(p.x, p.y, p.z, NukeBlast.KnockRadius + 20));
++            }
++            foreach (var b in Object.FindObjectsByType<Bomb>(FindObjectsSortMode.None))
++            {
++                Vector3 p = b.transform.position;
++                extra.Add(new Vector4(p.x, p.y, p.z, 40));
++            }
++            // A person on foot aims further than the players' reach (a rifle): what the view
++            // centre rests on, and a little round it.
++            var foot = FootPlayer.Active;
++            var cam = Camera.main;
++            if (foot && !foot.Riding && !foot.Aboard && cam
++                && Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 800, (1 << 0) | (1 << 10), QueryTriggerInteraction.Ignore)
++                && hit.distance > Radius * .5f)
++                extra.Add(new Vector4(hit.point.x, hit.point.y, hit.point.z, 30));
++        }
++
++        // Within the reach of any place (the switching of props and parked cars being built).
++        public static bool Near(Vector3 p)
++        {
++            foreach (var q in points)
++            {
++                float dx = p.x - q.x, dz = p.z - q.z;
++                if (dx * dx + dz * dz < q.w * q.w) return true;
++            }
++            return false;
++        }
++
++        // A player (or the camera) within `distance` of p: boats and planes stay awake.
++        public static bool PlayerNear(Vector3 p, float distance)
++        {
++            Update();
++            float d2 = distance * distance;
++            var cam = Camera.main;
++            if (cam && (cam.transform.position - p).sqrMagnitude < d2) return true;
++            foreach (var q in players)
++                if ((q - p).sqrMagnitude < d2) return true;
++            return false;
++        }
++    }
++}
+diff --git a/Assets/Drive/Scripts/World/PhysicsRange.cs.meta b/Assets/Drive/Scripts/World/PhysicsRange.cs.meta
+new file mode 100644
+index 0000000..8f42180
+--- /dev/null
++++ b/Assets/Drive/Scripts/World/PhysicsRange.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: d28d4e08216e427eb169bf03ab524776
+\ No newline at end of file

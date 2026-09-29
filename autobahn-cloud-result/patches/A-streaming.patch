@@ -1,0 +1,1756 @@
+diff --git a/Assets/Drive/Scripts/Gameplay/DriveValidation.cs b/Assets/Drive/Scripts/Gameplay/DriveValidation.cs
+index 636afa1..68d3808 100644
+--- a/Assets/Drive/Scripts/Gameplay/DriveValidation.cs
++++ b/Assets/Drive/Scripts/Gameplay/DriveValidation.cs
+@@ -1790,9 +1790,13 @@ namespace Autobahn
+                 if (h >= Island.SeaY) { seaRound = false; wet += $" land at {p}"; }
+             }
+             Check("Sea all round the island", seaRound, seaRound ? "all eight edge points are under water" : wet);
+-            Check("Forest round the island", world.EastCoastTrees > 800 && world.WestCoastTrees > 300 && ForestRenderer.Active && ForestRenderer.Active.Trees == world.TreeCount + GridWorld.CityTrees + GridWorld.EastTrees + GridWorld.WestTrees,
++            // The island streams in round the car: the instanced forest holds the trees of the tiles
++            // standing now, never more than the island has.
++            Check("Forest round the island", world.EastCoastTrees > 800 && world.WestCoastTrees > 300 && ForestRenderer.Active && ForestRenderer.Active.Trees > 0 && ForestRenderer.Active.Trees <= world.TreeCount + GridWorld.CityTrees + GridWorld.EastTrees + GridWorld.WestTrees,
+                 $"{world.EastCoastTrees} trees between the road and the sea on the east, {world.WestCoastTrees} on the west, {world.TreeCount} in all, {GridWorld.CityTrees} in the city (instanced {(ForestRenderer.Active ? ForestRenderer.Active.Trees : 0)})");
+             var site = Station.Sites[0];
++            // The town is only built while someone is near it.
++            WorldStreamer.Active?.BuildAround(Route.Center(Island.TownS), 50);
+             Check("Town and filling station at the top", world.TownRoot != null && world.TownRoot.childCount > 5 && Mathf.Abs(site.Z - Island.TownS) < 250 && Route.Center(site.Z).z > Island.TopZ - 60,
+                 $"town at s {Island.TownS:0}, station at s {site.Z:0}, z {Route.Center(site.Z).z:0}");
+ 
+diff --git a/Assets/Drive/Scripts/Gameplay/Focus.cs b/Assets/Drive/Scripts/Gameplay/Focus.cs
+index 6440677..a6f1ff8 100644
+--- a/Assets/Drive/Scripts/Gameplay/Focus.cs
++++ b/Assets/Drive/Scripts/Gameplay/Focus.cs
+@@ -10,7 +10,17 @@ namespace Autobahn
+         {
+             var foot = FootPlayer.Active;
+             if (foot) return foot.InPlane ? foot.InPlane.transform.position : foot.transform.position;
+-            return car ? car.position : Vector3.zero;
++            return Car(car);
++        }
++
++        // The car itself, wherever the driver is. Its body's position: a car just put down
++        // somewhere else (a new run, a teleport) is there before its transform catches up, and
++        // the world streaming in round it must see that before the next physics step.
++        public static Vector3 Car(Transform car)
++        {
++            if (!car) return Vector3.zero;
++            var body = car.GetComponent<Rigidbody>();
++            return body ? body.position : car.position;
+         }
+ 
+         // Extra reach for streaming when high up (an aircraft sees far).
+diff --git a/Assets/Drive/Scripts/Presentation/IslandSnapshot.cs b/Assets/Drive/Scripts/Presentation/IslandSnapshot.cs
+index bd0a418..777206d 100644
+--- a/Assets/Drive/Scripts/Presentation/IslandSnapshot.cs
++++ b/Assets/Drive/Scripts/Presentation/IslandSnapshot.cs
+@@ -96,6 +96,59 @@ namespace Autobahn
+             return tex;
+         }
+ 
++        // The world is streamed in round the player, so this picture means building the whole
++        // island once. It is generated the same way every time: the picture is kept on disk for
++        // this build of the game (the editor, which has no build id, renders it every time).
++        static string CachePath(int width)
++        {
++            string build = Application.buildGUID;
++            if (string.IsNullOrEmpty(build)) return null;
++            return System.IO.Path.Combine(Application.persistentDataPath, $"island-map-{build}-{width}-{(GraphicsQuality.Level == 0 ? "low" : "full")}.png");
++        }
++
++        public static bool LoadCached(int width)
++        {
++            if (Route.Endless) return false;
++            try
++            {
++                string path = CachePath(width);
++                if (path == null || !System.IO.File.Exists(path)) return false;
++                var tex = new Texture2D(2, 2, TextureFormat.RGB24, true) { name = "Island map", wrapMode = TextureWrapMode.Clamp, anisoLevel = 4 };
++                if (!tex.LoadImage(System.IO.File.ReadAllBytes(path)))
++                {
++                    Object.Destroy(tex);
++                    return false;
++                }
++                tex.wrapMode = TextureWrapMode.Clamp;
++                if (Image) Object.Destroy(Image);
++                Image = tex;
++                return true;
++            }
++            catch (System.Exception e)
++            {
++                Debug.LogWarning("AUTOBAHN map picture cache: " + e.Message);
++                return false;
++            }
++        }
++
++        public static void SaveCached(int width)
++        {
++            if (!Image) return;
++            try
++            {
++                string path = CachePath(width);
++                if (path == null) return;
++                // Pictures of earlier builds are no use any more.
++                foreach (var old in System.IO.Directory.GetFiles(Application.persistentDataPath, "island-map-*.png"))
++                    if (old != path) System.IO.File.Delete(old);
++                System.IO.File.WriteAllBytes(path, Image.EncodeToPNG());
++            }
++            catch (System.Exception e)
++            {
++                Debug.LogWarning("AUTOBAHN map picture cache: " + e.Message);
++            }
++        }
++
+         static Material mapSea;
+         static Material MapSea()
+         {
+diff --git a/Assets/Drive/Scripts/Presentation/WorldMap.cs b/Assets/Drive/Scripts/Presentation/WorldMap.cs
+index f4184b1..3ff4957 100644
+--- a/Assets/Drive/Scripts/Presentation/WorldMap.cs
++++ b/Assets/Drive/Scripts/Presentation/WorldMap.cs
+@@ -22,6 +22,9 @@ namespace Autobahn
+         Vector3 focus;
+         float zoom = 380;
+         bool savedFog;
++        // The island is streamed in round the player: a view reaching past what is built shows
++        // the map picture instead of the live world.
++        bool live = true;
+         RunSession run;
+ 
+         public void Init(RunSession session) => run = session;
+@@ -173,6 +176,9 @@ namespace Autobahn
+             mapCamera.orthographicSize = zoom;
+             mapCamera.aspect = 1.6f;
+             mapCamera.transform.SetPositionAndRotation(new Vector3(focus.x, 1200, focus.z), Quaternion.Euler(90, 0, 0));
++            var view = Rect.MinMaxRect(focus.x - zoom * 1.6f, focus.z - zoom, focus.x + zoom * 1.6f, focus.z + zoom);
++            live = Route.Endless || !IslandSnapshot.Ready || WorldStreamer.Active == null || WorldStreamer.Active.Covers(view);
++            mapCamera.enabled = live;
+         }
+ 
+         // Called from the HUD's OnGUI inside its 1440 x 900 space.
+@@ -181,7 +187,14 @@ namespace Autobahn
+             if (!Open || target == null) return;
+             var area = new Rect(40, 60, 1360, 850);
+             // The full-screen shade behind the map is drawn by the HUD, in screen space.
+-            GUI.DrawTexture(area, target, ScaleMode.ScaleAndCrop);
++            if (live) GUI.DrawTexture(area, target, ScaleMode.ScaleAndCrop);
++            else
++            {
++                // The same view cut from the map picture (both 1.6 : 1, north up).
++                Vector2 lo = IslandSnapshot.ToUV(new Vector3(focus.x - zoom * 1.6f, 0, focus.z - zoom));
++                Vector2 hi = IslandSnapshot.ToUV(new Vector3(focus.x + zoom * 1.6f, 0, focus.z + zoom));
++                GUI.DrawTextureWithTexCoords(area, IslandSnapshot.Image, new Rect(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y));
++            }
+ 
+             // Markers: project world points into the map rectangle.
+             Vector2 ToMap(Vector3 world)
+diff --git a/Assets/Drive/Scripts/World/ForestRenderer.cs b/Assets/Drive/Scripts/World/ForestRenderer.cs
+index ae13147..a7c2494 100644
+--- a/Assets/Drive/Scripts/World/ForestRenderer.cs
++++ b/Assets/Drive/Scripts/World/ForestRenderer.cs
+@@ -38,7 +38,11 @@ namespace Autobahn
+             public bool[] Down;                      // per tree: knocked down (not drawn)
+         }
+ 
++        // Tile slots: a slot is emptied when its ground is unloaded (world streaming) and reused
++        // later, so the numbers the trunks and felled trees keep stay valid.
+         readonly List<Tile> tiles = new();
++        readonly Stack<int> freeSlots = new();
++        bool logged;
+         readonly List<Group> groups = new();
+         readonly Dictionary<(Foliage.Kind, bool, int), int> groupOf = new();
+         public int Trees { get; private set; }
+@@ -75,9 +79,10 @@ namespace Autobahn
+             return groups.Count - 1;
+         }
+ 
+-        public void AddTile(Vector3 centre, List<Plant> plants)
++        // Returns the tile's id for RemoveTile (-1: no trees).
++        public int AddTile(Vector3 centre, List<Plant> plants)
+         {
+-            if (plants.Count == 0) return;
++            if (plants.Count == 0) return -1;
+             var tile = new Tile
+             {
+                 Centre = centre,
+@@ -98,12 +103,44 @@ namespace Autobahn
+                 tile.Spot[i] = new Vector2(p.Position.x, p.Position.z);
+                 tile.FarMatrix[i] = Matrix4x4.TRS(p.Position, yaw, Vector3.one * fs);
+             }
+-            tiles.Add(tile);
+-            if (tiles.Count == 1)
++            int id;
++            if (freeSlots.Count > 0)
++            {
++                id = freeSlots.Pop();
++                tiles[id] = tile;
++            }
++            else
++            {
++                id = tiles.Count;
++                tiles.Add(tile);
++            }
++            if (!logged)
++            {
++                logged = true;
+                 foreach (Foliage.Kind k in System.Enum.GetValues(typeof(Foliage.Kind)))
+                     Debug.Log($"AUTOBAHN forest {k}: near {Foliage.VariantCount(k, false)} variants {Foliage.Triangles(k, false, 0)} tris, far {Foliage.VariantCount(k, true)} variants {Foliage.Triangles(k, true, 0)} tris");
++            }
+             Trees += plants.Count;
+             dirty = true;
++            return id;
++        }
++
++        // The ground under a tile was unloaded: its trees go with it, felled ones included.
++        public void RemoveTile(int id)
++        {
++            if (id < 0 || id >= tiles.Count || tiles[id] == null) return;
++            Trees -= tiles[id].Spot.Length;
++            for (int k = down.Count - 1; k >= 0; k--)
++                if (down[k].tile == id)
++                {
++                    if (down[k].body) Destroy(down[k].body);
++                    down.RemoveAt(k);
++                }
++            foreach (var c in trunks)
++                if (c && c.gameObject.activeSelf && c.GetComponent<Trunk>().Tile == id) c.gameObject.SetActive(false);
++            tiles[id] = null;
++            freeSlots.Push(id);
++            dirty = true;
+         }
+ 
+         // Detailed trees this close to the camera (metres), chosen per tree; the cheap model out to
+@@ -129,6 +166,7 @@ namespace Autobahn
+             int nearCount = 0, farCount = 0;
+             foreach (var t in tiles)
+             {
++                if (t == null) continue;
+                 float d = new Vector2(t.Centre.x - cam.x, t.Centre.z - cam.z).magnitude;
+                 if (d > reach && !RoadWorld.ShowAll) continue;
+                 if (cullBehind && Vector2.Dot(new Vector2(t.Centre.x - cam.x, t.Centre.z - cam.z), ahead) < -(BehindMargin + 160)) continue;
+@@ -164,7 +202,7 @@ namespace Autobahn
+         // for cameras that render after the call, so call this just before camera.Render().
+         public void DrawFor(Camera camera)
+         {
+-            if (tiles.Count == 0 || !camera) return;
++            if (Trees == 0 || !camera) return;
+             Refresh(camera.transform.position, camera.transform.forward);
+             dirty = true;
+             Draw(camera);
+@@ -172,7 +210,7 @@ namespace Autobahn
+ 
+         void LateUpdate()
+         {
+-            if (Hidden || tiles.Count == 0) return;
++            if (Hidden || Trees == 0) return;
+             var camera = Camera.main;
+             if (!camera) return;
+             Vector3 cam = camera.transform.position;
+@@ -206,7 +244,7 @@ namespace Autobahn
+ 
+         void FixedUpdate()
+         {
+-            if (tiles.Count == 0 || Time.time < nextTrunks) return;
++            if (Trees == 0 || Time.time < nextTrunks) return;
+             nextTrunks = Time.time + .1f;
+             PlaceTrunks();
+         }
+@@ -241,7 +279,7 @@ namespace Autobahn
+                 for (int ti = 0; ti < tiles.Count && used < trunks.Count; ti++)
+                 {
+                     var t = tiles[ti];
+-                    if (new Vector2(t.Centre.x - f.x, t.Centre.z - f.z).sqrMagnitude > 175 * 175) continue;
++                    if (t == null || new Vector2(t.Centre.x - f.x, t.Centre.z - f.z).sqrMagnitude > 175 * 175) continue;
+                     for (int i = 0; i < t.Spot.Length && used < trunks.Count; i++)
+                     {
+                         if (t.Down[i] || (t.Spot[i] - f2).sqrMagnitude > TrunkReach * TrunkReach) continue;
+@@ -281,7 +319,7 @@ namespace Autobahn
+         {
+             if (trunk.Tile >= tiles.Count) return false;
+             var t = tiles[trunk.Tile];
+-            if (t.Down[trunk.Index] || before.magnitude * 3.6f < BreakKmh) return false;
++            if (t == null || trunk.Index >= t.Down.Length || t.Down[trunk.Index] || before.magnitude * 3.6f < BreakKmh) return false;
+             Fell(trunk.Tile, trunk.Index, before);
+             trunk.gameObject.SetActive(false);
+             car.Body.linearVelocity = before * .72f;
+@@ -340,7 +378,7 @@ namespace Autobahn
+             for (int ti = 0; ti < tiles.Count; ti++)
+             {
+                 var t = tiles[ti];
+-                if (new Vector2(t.Centre.x - at.x, t.Centre.z - at.z).sqrMagnitude > 200 * 200) continue;
++                if (t == null || new Vector2(t.Centre.x - at.x, t.Centre.z - at.z).sqrMagnitude > 200 * 200) continue;
+                 for (int i = 0; i < t.Spot.Length; i++)
+                 {
+                     if (t.Down[i]) continue;
+@@ -360,7 +398,7 @@ namespace Autobahn
+             if (!f) return;
+             foreach (var (tile, index, _, body) in f.down)
+             {
+-                f.tiles[tile].Down[index] = false;
++                if (f.tiles[tile] != null) f.tiles[tile].Down[index] = false;
+                 if (body) Destroy(body);
+             }
+             f.down.Clear();
+@@ -373,7 +411,7 @@ namespace Autobahn
+             at = default;
+             float best = float.MaxValue;
+             foreach (var t in tiles)
+-                for (int i = 0; i < t.Spot.Length; i++)
++                for (int i = 0; t != null && i < t.Spot.Length; i++)
+                 {
+                     if (t.Down[i]) continue;
+                     float d = (t.Spot[i] - new Vector2(p.x, p.z)).sqrMagnitude;
+diff --git a/Assets/Drive/Scripts/World/GridCity.cs b/Assets/Drive/Scripts/World/GridCity.cs
+index a1e939c..408ee22 100644
+--- a/Assets/Drive/Scripts/World/GridCity.cs
++++ b/Assets/Drive/Scripts/World/GridCity.cs
+@@ -86,6 +86,14 @@ namespace Autobahn
+         // block: build the houses between the streets; north / east: build the street leaving the
+         // junction that way. The island city's outer ring uses junction-only tiles.
+         public static void BuildTile(Transform root, int ti, int tj, bool block = true, bool north = true, bool east = true, int bigPark = 0, bool station = false)
++        {
++            var steps = BuildTileSteps(root, ti, tj, block, north, east, bigPark, station);
++            while (steps.MoveNext()) { }
++        }
++
++        // The same, a part at a time (the island city streams its blocks in while the player
++        // drives): streets and markings, signals, pavements, street life, then the houses side by side.
++        public static IEnumerator<object> BuildTileSteps(Transform root, int ti, int tj, bool block = true, bool north = true, bool east = true, int bigPark = 0, bool station = false)
+         {
+             int pi = Mod(ti, Window), pj = Mod(tj, Window);
+             var rnd = new System.Random(pi * 7919 + pj * 104729 + 17);
+@@ -124,13 +132,15 @@ namespace Autobahn
+                 Vector3 bar = alongZ ? new Vector3(-sign * H / 2, .013f, sign * 13.6f) : new Vector3(sign * 13.6f, .013f, sign * H / 2);
+                 Box(root, "Stop line", bar, alongZ ? new Vector3(H, .02f, .4f) : new Vector3(.4f, .02f, H), Art.Line);
+             }
++            yield return null;
+ 
+             // German-style signals: a mast on the right of every approach with an arm
+             // over the lanes, one head above each lane and a repeater on the pole.
+             for (int k = 0; k < 4; k++)
+                 Signal(root, k);
+             if (!block)
+-                return;
++                yield break;
++            yield return null;
+ 
+             // --- the block between the two streets
+             float lo = H, hi = B - H, span = hi - lo, mid = B / 2;
+@@ -167,15 +177,17 @@ namespace Autobahn
+                     else
+                         Art.Broadleaf(root, edge + new Vector3(0, .14f, 0), R(5.5f, 8f));
+                 }
++            yield return null;
+ 
+             Details(root, rnd, ti, tj, lo, hi, w0, w1);
++            yield return null;
+ 
+             float m = w1;                  // building line, flush with the pavement
+             float length = B - 2 * m;
+             if (bigPark > 0)
+             {
+                 BigPark(root, rnd, m, bigPark, ti, tj);
+-                return;
++                yield break;
+             }
+             if (park)
+             {
+@@ -191,17 +203,21 @@ namespace Autobahn
+                 }
+                 Box(root, "Monument plinth", new(mid, 1.2f, mid), new(3, 2.4f, 3), Art.Concrete, true);
+                 Box(root, "Monument", new(mid, 4, mid), new(1.2f, 3.2f, 1.2f), Art.Steel);
+-                return;
++                yield break;
+             }
+ 
+             if (carPark)
++            {
+                 CarPark(root, rnd, m);
++                yield return null;
++            }
+             // The city's filling station fills the west half of its block, facing the avenue.
+             if (station)
+             {
+                 GasStation.Build(root, new Vector3(m, .07f, mid), Quaternion.identity, "НЕФТЬ 67", true);
+                 // The player's garage, where every run starts, next to the station.
+                 Garage.Build(root, new Vector3(m, .07f, B - m - 18));
++                yield return null;
+             }
+ 
+             // Perimeter block: a closed row of houses along every street, courtyard inside.
+@@ -230,6 +246,7 @@ namespace Autobahn
+                     House(root, rnd, side, at + width / 2, width, depth, m, floors);
+                     at += width;
+                 }
++                yield return null;
+             }
+ 
+             // Courtyard trees.
+diff --git a/Assets/Drive/Scripts/World/GridWorld.cs b/Assets/Drive/Scripts/World/GridWorld.cs
+index f40c997..18b38ec 100644
+--- a/Assets/Drive/Scripts/World/GridWorld.cs
++++ b/Assets/Drive/Scripts/World/GridWorld.cs
+@@ -6,6 +6,8 @@ namespace Autobahn
+     // Keeps a Window x Window patch of city tiles around the car. Tiles that fall behind
+     // jump a whole window ahead; the pattern repeats every Window tiles, so a moved tile
+     // is already the right one for its new place and nothing has to be rebuilt.
++    // The island's city is a fixed set of blocks instead, streamed in and out round the player
++    // like the rest of the island (WorldStreamer).
+     public sealed class GridWorld : MonoBehaviour
+     {
+         public static GridWorld Active { get; private set; }
+@@ -20,6 +22,11 @@ namespace Autobahn
+             public Transform Root;
+             public int I, J;
+             public Rigidbody Body;
++            // Island city: its streaming unit, its trees in the instanced forest, and whether its
++            // trees were counted (a block built again is not counted again).
++            public StreamUnit Unit;
++            public int Forest = -1;
++            public bool Counted;
+         }
+ 
+         readonly List<Tile> tiles = new();
+@@ -60,43 +67,95 @@ namespace Autobahn
+ 
+         public static int CityTrees;
+ 
++        // The island city: every block is a streaming unit, built when the player comes near and
++        // destroyed again once far away. The block with the filling station and the garage (where
++        // every run starts) always stands.
+         public void BuildIsland(Transform follow)
+         {
+             bounded = true;
+             IslandCity = this;
+-            IslandBuilding = true;
+             player = follow;
+-            var saved = Random.state;
+-            Random.InitState(4711);
++            var streamer = WorldStreamer.Active;
+             for (int j = 0; j <= Island.CityTilesZ; j++)
+                 for (int i = 0; i <= Island.CityTilesX; i++)
+                 {
+                     bool inside = i < Island.CityTilesX && j < Island.CityTilesZ;
+                     bool north = j < Island.CityTilesZ, east = i < Island.CityTilesX;
+-                    var root = new GameObject($"City tile {i},{j}").transform;
+-                    root.SetParent(transform, false);
+-                    root.position = new Vector3(i * GridCity.Block, 0, j * GridCity.Block);
+                     // Pattern index: downtown lands in the middle of the city.
+                     // Two big fenced parks, and no others: the central one in the middle of downtown
+                     // and a neighbourhood park among the houses of the east side (well away from the port).
+                     int park = inside && i == 3 && (j == 1 || j == 2) ? 1 : inside && i == 5 && (j == 2 || j == 3) ? 2 : 0;
+                     // The filling station: the block right by the start, on the avenue.
+-                    // The city's trees go to the instanced forest (they were merged meshes of the
+-                    // detailed model: several million triangles in view from a street).
+-                    var plants = new List<ForestRenderer.Plant>();
+-                    Foliage.Capture = plants;
+-                    try { GridCity.BuildTile(root, i, j + 1, inside, north, east, park, inside && i == 0 && j == 2); }
+-                    finally { Foliage.Capture = null; }
+-                    if (plants.Count > 0)
+-                        ForestRenderer.Ensure(transform).AddTile(root.position + new Vector3(GridCity.Block / 2, 0, GridCity.Block / 2), plants);
+-                    CityTrees += plants.Count;
+-                    Art.Combine(root);
+-                    Art.Strip(root);
+-                    tiles.Add(new Tile{Root = root, I = i, J = j});
++                    bool station = inside && i == 0 && j == 2;
++                    var tile = new Tile{I = i, J = j};
++                    var at = new Vector3(i * GridCity.Block, 0, j * GridCity.Block);
++                    // The junction's signals stand 15 m out from the corner; the block reaches the next junction.
++                    var area = Rect.MinMaxRect(at.x - 22, at.z - 22, at.x + GridCity.Block + 2, at.z + GridCity.Block + 2);
++                    tile.Unit = new StreamUnit($"City tile {i},{j}", transform, at, area, root => CityTile(tile, root, inside, north, east, park, station))
++                    {
++                        Keep = station,
++                        Unloading = root => DropTile(tile),
++                    };
++                    tiles.Add(tile);
++                    if (streamer) streamer.Add(tile.Unit);
++                    else
++                    {
++                        // No streaming (should not happen): build it now, as before.
++                        var root = new GameObject(tile.Unit.Name).transform;
++                        root.SetParent(transform, false);
++                        root.position = at;
++                        var steps = CityTile(tile, root, inside, north, east, park, station);
++                        while (steps.MoveNext()) { }
++                    }
+                 }
++            var saved = Random.state;
++            Random.InitState(4711);
+             EastWoods();
+             Random.state = saved;
+-            IslandBuilding = false;
++        }
++
++        // One block of the island city, a part per frame. Built from its own seed (GridCity), so
++        // it is the same every time it comes back.
++        IEnumerator<object> CityTile(Tile t, Transform root, bool inside, bool north, bool east, int park, bool station)
++        {
++            t.Root = root;
++            // The city's trees go to the instanced forest (they were merged meshes of the
++            // detailed model: several million triangles in view from a street).
++            var plants = new List<ForestRenderer.Plant>();
++            var steps = WorldStreamer.Scoped(GridCity.BuildTileSteps(root, t.I, t.J + 1, inside, north, east, park, station),
++                () => { Foliage.Capture = plants; IslandBuilding = true; },
++                () => { Foliage.Capture = null; IslandBuilding = false; });
++            while (steps.MoveNext()) yield return null;
++            if (plants.Count > 0)
++                t.Forest = ForestRenderer.Ensure(transform).AddTile(root.position + new Vector3(GridCity.Block / 2, 0, GridCity.Block / 2), plants);
++            if (!t.Counted)
++            {
++                CityTrees += plants.Count;
++                t.Counted = true;
++            }
++            yield return null;
++            // Parked cars merge their own model and stay out of the block's mesh; one switched
++            // back on while the block was still being built would be merged into it (see
++            // ParkedCarBody.Hold): they sit out the merge.
++            var parked = root.GetComponentsInChildren<ParkedCarBody>(true);
++            var wasOn = new bool[parked.Length];
++            for (int k = 0; k < parked.Length; k++)
++            {
++                wasOn[k] = parked[k].gameObject.activeSelf;
++                parked[k].gameObject.SetActive(false);
++            }
++            Art.Combine(root);
++            Art.Strip(root);
++            for (int k = 0; k < parked.Length; k++)
++                if (wasOn[k] && parked[k]) parked[k].gameObject.SetActive(true);
++            AddAnchors(root);
++        }
++
++        void DropTile(Tile t)
++        {
++            if (t.Forest >= 0) ForestRenderer.Active?.RemoveTile(t.Forest);
++            t.Forest = -1;
++            t.Root = null;
+         }
+ 
+         // A belt of mixed woodland along the city's east edge (it was an empty field): clear of
+@@ -219,9 +278,21 @@ namespace Autobahn
+ 
+         // At night a small pool of real lights follows the lamps nearest the camera.
+         readonly List<Transform> anchors = new();
++        readonly HashSet<Transform> anchorSet = new();
+         readonly List<Light> pool = new();
+         float nextLights, poolReach;
+ 
++        // The lamps of a block that has just been built (the island city streams its blocks);
++        // those of unloaded blocks drop out.
++        void AddAnchors(Transform root)
++        {
++            if (pool.Count == 0) return;      // the first night-light pass collects everything
++            anchors.RemoveAll(a => !a);
++            anchorSet.RemoveWhere(a => !a);
++            foreach (var t in root.GetComponentsInChildren<Transform>(true))
++                if (t.name == "Lamp anchor" && anchorSet.Add(t)) anchors.Add(t);
++        }
++
+         void StreetLights()
+         {
+             var clock = System.Diagnostics.Stopwatch.StartNew();
+@@ -256,7 +327,7 @@ namespace Autobahn
+             if (pool.Count == 0)
+             {
+                 foreach (var t in GetComponentsInChildren<Transform>(true))
+-                    if (t.name == "Lamp anchor") anchors.Add(t);
++                    if (t.name == "Lamp anchor" && anchorSet.Add(t)) anchors.Add(t);
+                 for (int i = 0; i < PoolSize; i++)
+                 {
+                     var l = new GameObject("Street light").AddComponent<Light>();
+@@ -308,6 +379,8 @@ namespace Autobahn
+             for (int i = 0; i < pool.Count; i++)
+             {
+                 bool keep = lampOf[i] && wanted.Contains(lampOf[i]);
++                // A lamp whose block was unloaded meanwhile is skipped.
++                while (pending.Count > 0 && !pending.Peek()) pending.Dequeue();
+                 if (!keep && level[i] <= 0 && pending.Count > 0)
+                 {
+                     lampOf[i] = pending.Dequeue();
+@@ -325,7 +398,10 @@ namespace Autobahn
+         public void Clear()
+         {
+             foreach (var t in tiles)
+-                if (t.Root) Destroy(t.Root.gameObject);
++            {
++                if (t.Unit != null && WorldStreamer.Active) WorldStreamer.Active.Remove(t.Unit);
++                else if (t.Root) Destroy(t.Root.gameObject);
++            }
+             tiles.Clear();
+             if (far) Destroy(far.gameObject);
+             if (Active == this) Active = null;
+diff --git a/Assets/Drive/Scripts/World/IslandWorld.cs b/Assets/Drive/Scripts/World/IslandWorld.cs
+index 8d878cf..44f5ecd 100644
+--- a/Assets/Drive/Scripts/World/IslandWorld.cs
++++ b/Assets/Drive/Scripts/World/IslandWorld.cs
+@@ -5,7 +5,9 @@ namespace Autobahn
+ {
+     // Builds the island around the loop road: ground tiles (grass, sand, rock, snow) with
+     // their trees, the sea, the city grid with its harbour, the small town at the top and
+-    // rocks off the coast. Ground tiles far from the car are switched off.
++    // rocks off the coast. Ground tiles, city blocks and the town are streamed: built when the
++    // player comes near and destroyed when far away (WorldStreamer). The sea, the harbour, the
++    // airport with its aircraft, the carrier and the boats always stay.
+     public sealed class IslandWorld : MonoBehaviour
+     {
+         public static IslandWorld Active { get; private set; }
+@@ -13,21 +15,36 @@ namespace Autobahn
+         const float X0 = -1000, Z0 = -600;
+         const int TilesX = 16, TilesZ = 31;
+ 
+-        readonly List<Transform> tiles = new();
+-        Transform player, town;
+-        public int TileCount => tiles.Count;
++        // A ground tile of the island: one with land, or with sea bed above the dark floor.
++        sealed class Ground
++        {
++            public int X, Z;
++            public StreamUnit Unit;
++            public int Forest = -1;
++            // The hill boulders standing on it, placed once for the whole island.
++            public readonly List<(int Model, Vector3 At, Vector3 Scale, Quaternion Turn)> Boulders = new();
++        }
++
++        readonly List<Ground> grounds = new();
++        Ground[,] slots;
++        StreamUnit town;
++        public int TileCount => grounds.Count;
+         public MeshRenderer SeaRenderer { get; private set; }
+-        public int TreeCount { get; private set; }
+-        // Trees on the sea side of the road: east coast (forest) and west coast (open).
+-        public int EastCoastTrees { get; private set; }
+-        public int WestCoastTrees { get; private set; }
++        // Trees on the whole island, counted from the same seeds without building it (the tiles
++        // themselves come and go); and on the sea side of the road: east coast (forest) and west
++        // coast (open).
++        public int TreeCount { get { Census(); return treeCount; } }
++        public int EastCoastTrees { get { Census(); return eastCoast; } }
++        public int WestCoastTrees { get { Census(); return westCoast; } }
++        int treeCount = -1, eastCoast, westCoast;
+         public GridWorld City { get; private set; }
+-        public Transform TownRoot => town;
++        // The town while it stands (null when the player is far from it).
++        public Transform TownRoot => town?.Root;
+ 
+         public void Build(Transform follow)
+         {
+             Active = this;
+-            player = follow;
++            var streamer = WorldStreamer.Active ? WorldStreamer.Active : WorldStreamer.Ensure(gameObject, follow);
+             Island.Materials();
+             var clock = System.Diagnostics.Stopwatch.StartNew();
+             var saved = Random.state;
+@@ -76,11 +93,21 @@ namespace Autobahn
+             }
+             long ground = clock.ElapsedMilliseconds;
+ 
++            // Which tiles exist at all; they are built when the player comes near.
++            slots = new Ground[TilesX, TilesZ];
+             for (int iz = 0; iz < TilesZ; iz++)
+                 for (int ix = 0; ix < TilesX; ix++)
+                 {
+-                    var t = GroundTile(ix, iz);
+-                    if (t) tiles.Add(t);
++                    if (!HasGround(ix, iz)) continue;
++                    var g = new Ground { X = ix, Z = iz };
++                    float ox = X0 + ix * Tile, oz = Z0 + iz * Tile;
++                    g.Unit = new StreamUnit($"Island {ix},{iz}", transform, new Vector3(ox, 0, oz), new Rect(ox, oz, Tile, Tile), root => GroundTile(g, root))
++                    {
++                        Unloading = root => DropGround(g),
++                    };
++                    slots[ix, iz] = g;
++                    grounds.Add(g);
++                    streamer.Add(g.Unit);
+                 }
+             ground = clock.ElapsedMilliseconds - ground;
+ 
+@@ -94,23 +121,32 @@ namespace Autobahn
+ 
+             Harbour();
+             Airport();
+-            town = new GameObject("Northern town").transform;
+-            town.SetParent(transform, false);
+-            Town(town);
++            // The town along the road at the top: its houses reach about 30 m off the road, its
++            // name boards stand 40 m beyond the last houses.
++            var townLine = new List<Vector3>();
++            for (float s = Island.TownS - Island.TownHalf - 60; s <= Island.TownS + Island.TownHalf + 60; s += 20)
++                townLine.Add(Route.Center(s));
++            town = streamer.Add(new StreamUnit("Northern town", transform, Vector3.zero, WorldStreamer.AreaOf(townLine, 40), Town));
+             Rocks();
+             Random.state = saved;
+-            Debug.Log($"AUTOBAHN island: {tiles.Count} ground tiles, {TreeCount} trees in {ground} ms, city in {city} ms, total {clock.ElapsedMilliseconds} ms");
+-            Stream(true);
++            Debug.Log($"AUTOBAHN island: {grounds.Count} ground tiles to stream (found in {ground} ms), city of {City.TileCount} blocks set up in {city} ms, total {clock.ElapsedMilliseconds} ms");
+             StartCoroutine(TakeMapPicture());
+         }
+ 
+-        // The map picture (minimap, big map) once the world stands, while the title is up.
++        // The map picture (minimap, big map) once the world stands, while the title is up. It
++        // needs the whole island built once: it is kept on disk for this build of the game.
+         System.Collections.IEnumerator TakeMapPicture()
+         {
+             yield return null;
+             yield return new WaitForSecondsRealtime(.8f);
+             var clock = System.Diagnostics.Stopwatch.StartNew();
++            if (IslandSnapshot.LoadCached(1536))
++            {
++                Debug.Log($"AUTOBAHN map picture from the cache in {clock.ElapsedMilliseconds} ms");
++                yield break;
++            }
+             IslandSnapshot.Render(1536);
++            IslandSnapshot.SaveCached(1536);
+             Debug.Log($"AUTOBAHN map picture in {clock.ElapsedMilliseconds} ms");
+         }
+ 
+@@ -131,29 +167,33 @@ namespace Autobahn
+                 : h11 + (1 - fx) * (h01 - h11) + (1 - fz) * (h10 - h11);
+         }
+ 
+-        Transform GroundTile(int ix, int iz)
++        // Sea tiles too while their bed is above the dark floor: the bed then runs on smoothly
++        // instead of ending in a straight edge seen through the water.
++        static bool HasGround(int ix, int iz)
+         {
+             float ox = X0 + ix * Tile, oz = Z0 + iz * Tile;
+             int n = Mathf.RoundToInt(Tile / Res) + 1;
++            for (int j = 0; j < n; j++)
++                for (int i = 0; i < n; i++)
++                    if (Island.GroundHeight(ox + i * Res, oz + j * Res) > -30.5f) return true;
++            return false;
++        }
++
++        // One ground tile: the ground mesh and its collider, then its trees and boulders.
++        IEnumerator<object> GroundTile(Ground g, Transform root)
++        {
++            float ox = X0 + g.X * Tile, oz = Z0 + g.Z * Tile;
++            int n = Mathf.RoundToInt(Tile / Res) + 1;
+             var v = new Vector3[n * n];
+             var uv = new Vector2[n * n];
+-            bool land = false;
+             for (int j = 0; j < n; j++)
+                 for (int i = 0; i < n; i++)
+                 {
+                     float x = ox + i * Res, z = oz + j * Res;
+                     float h = Island.GroundHeight(x, z);
+-                    // Sea tiles too while their bed is above the dark floor: the bed then runs on
+-                    // smoothly instead of ending in a straight edge seen through the water.
+-                    if (h > -30.5f) land = true;
+                     v[j * n + i] = new Vector3(i * Res, h, j * Res);
+                     uv[j * n + i] = new Vector2(x / 32, z / 32);
+                 }
+-            if (!land) return null;
+-
+-            var root = new GameObject($"Island {ix},{iz}").transform;
+-            root.SetParent(transform, false);
+-            root.position = new Vector3(ox, 0, oz);
+ 
+             var go = new GameObject("Island ground");
+             go.layer = 10;
+@@ -224,9 +264,27 @@ namespace Autobahn
+                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+             }
+             go.AddComponent<MeshCollider>().sharedMesh = mesh;
++            yield return null;
++
++            // The forest on this tile: positions only; ForestRenderer draws them instanced.
++            var plants = new List<ForestRenderer.Plant>();
++            Plants(g.X, g.Z, plants, out _, out _);
++            g.Forest = ForestRenderer.Ensure(transform).AddTile(new Vector3(ox + Tile / 2, 0, oz + Tile / 2), plants);
++            // Hang the boulders on their ground tile, so they come and go with the ground under them.
++            foreach (var (model, at, scale, turn) in g.Boulders)
++            {
++                var (mesh1, skin) = Island.Boulders[model];
++                var b = Art.MeshObject(root, "Hill boulder", mesh1, skin, false).transform;
++                b.localScale = scale;
++                b.position = at;
++                b.rotation = turn;
++            }
++        }
+ 
+-            Trees(root, ox, oz, ix * 7919 + iz * 104729);
+-            return root;
++        void DropGround(Ground g)
++        {
++            if (g.Forest >= 0) ForestRenderer.Active?.RemoveTile(g.Forest);
++            g.Forest = -1;
+         }
+ 
+         // Surface weights for a ground vertex: grass, forest floor, rock, sand (the shader blends).
+@@ -255,12 +313,14 @@ namespace Autobahn
+             return new Color32((byte)(wg * 255), (byte)(wd * 255), (byte)(wr * 255), (byte)(sand * 255));
+         }
+ 
+-        // The forest on this tile: positions only; ForestRenderer draws them instanced.
+-        void Trees(Transform root, float ox, float oz, int seed)
++        // The trees of a tile, from the tile's own seed: the same every time it is built.
++        // `east` / `west`: how many stand between the road and the sea on either coast.
++        static void Plants(int ix, int iz, List<ForestRenderer.Plant> plants, out int east, out int west)
+         {
+-            var rnd = new System.Random(seed);
++            east = west = 0;
++            float ox = X0 + ix * Tile, oz = Z0 + iz * Tile;
++            var rnd = new System.Random(ix * 7919 + iz * 104729);
+             float R(float a, float b) => (float)(a + rnd.NextDouble() * (b - a));
+-            var plants = new List<ForestRenderer.Plant>();
+             int attempts = GraphicsQuality.Level == 0 ? 380 : 640;
+             for (int n = 0; n < attempts; n++)
+             {
+@@ -287,12 +347,31 @@ namespace Autobahn
+                 float lat = z > Island.RouteStartZ ? RouteSide(x, z) : -1;
+                 if (lat < 0 && z > Island.RouteStartZ + 300 && z < Island.TopZ - 400)
+                 {
+-                    if (x > Island.CityW) EastCoastTrees++;
+-                    else if (x < 0) WestCoastTrees++;
++                    if (x > Island.CityW) east++;
++                    else if (x < 0) west++;
+                 }
+             }
+-            TreeCount += plants.Count;
+-            ForestRenderer.Ensure(transform).AddTile(new Vector3(ox + Tile / 2, 0, oz + Tile / 2), plants);
++        }
++
++        // The island's trees counted without building it (the automated checks ask).
++        void Census()
++        {
++            if (treeCount >= 0) return;
++            var clock = System.Diagnostics.Stopwatch.StartNew();
++            int trees = 0, east = 0, west = 0;
++            var plants = new List<ForestRenderer.Plant>();
++            foreach (var g in grounds)
++            {
++                plants.Clear();
++                Plants(g.X, g.Z, plants, out int e, out int w);
++                trees += plants.Count;
++                east += e;
++                west += w;
++            }
++            treeCount = trees;
++            eastCoast = east;
++            westCoast = west;
++            Debug.Log($"AUTOBAHN island census: {trees} trees on {grounds.Count} ground tiles in {clock.ElapsedMilliseconds} ms");
+         }
+ 
+         static float RouteSide(float x, float z) => Island.RoadDistance(x, z) < 140 ? Route.Lateral(new Vector3(x, 0, z)) : SideFar(x, z);
+@@ -559,7 +638,8 @@ namespace Autobahn
+         }
+ 
+         // --- the small town and its filling station at the top ------------------------------------
+-        void Town(Transform root)
++        // Streamed like the tiles: a few houses a frame, from its own seed.
++        IEnumerator<object> Town(Transform root)
+         {
+             float centre = Island.TownS;
+             var rnd = new System.Random(4242);
+@@ -568,6 +648,7 @@ namespace Autobahn
+             for (int side = -1; side <= 1; side += 2)
+             {
+                 float s = centre - Island.TownHalf;
++                int houses = 0;
+                 while (s < centre + Island.TownHalf)
+                 {
+                     float width = R(11, 17);
+@@ -579,6 +660,7 @@ namespace Autobahn
+                         front.y = Route.Height(mid) - .05f;
+                         var rotation = Quaternion.LookRotation(Route.Right(mid) * side, Vector3.up);
+                         GridCity.Townhouse(root, root.InverseTransformPoint(front), rotation, rnd, width - .6f, R(10, 13), rnd.Next(2, 5), rnd.NextDouble() < .45);
++                        if (++houses % 4 == 0) yield return null;
+                     }
+                     s += width;
+                 }
+@@ -594,6 +676,7 @@ namespace Autobahn
+                         GridCity.LampPost(root, root.InverseTransformPoint(foot), root.InverseTransformDirection(-Route.Right(t) * side));
+                     }
+                 }
++                yield return null;
+             }
+             // Name boards at both ends of the town.
+             foreach (float at in new[] { centre - Island.TownHalf - 40, centre + Island.TownHalf + 40 })
+@@ -607,6 +690,7 @@ namespace Autobahn
+                 Art.Text(sign, "СЕВЕРНЫЙ", new Vector3(0, 2.6f, -.08f), .34f, Color.black);
+                 Knockable.End(sign, 60, 0, false, new Bounds(new Vector3(0, 1.5f, 0), new Vector3(3.6f, 3, .4f)));
+             }
++            yield return null;
+             Art.Combine(root);
+             Art.Strip(root);
+         }
+@@ -660,19 +744,20 @@ namespace Autobahn
+                 float s = Route.Locate(p);
+                 if (Mathf.Abs(Route.Lateral(p)) < 22 || Island.InTown(s, Route.Lateral(p))) continue;
+                 if (h < 25 && rnd.NextDouble() < .7) continue;          // mostly up in the hills
+-                var (mesh, skin) = Island.Boulders[rnd.Next(Island.Boulders.Length)];
++                int model = rnd.Next(Island.Boulders.Length);
++                var mesh = Island.Boulders[model].Item1;
+                 // Hang it on its ground tile, so it streams in and out with the ground under it.
++                // Placed here for the whole island, built with its tile.
+                 int tx = Mathf.FloorToInt((p.x - X0) / Tile), tz = Mathf.FloorToInt((p.z - Z0) / Tile);
+-                Transform tileRoot = null;
+-                foreach (var t in tiles) if (t && t.name == $"Island {tx},{tz}") { tileRoot = t; break; }
+-                if (!tileRoot) continue;
+-                var b = Art.MeshObject(tileRoot, "Hill boulder", mesh, skin, false).transform;
++                var tile = tx >= 0 && tz >= 0 && tx < TilesX && tz < TilesZ ? slots[tx, tz] : null;
++                if (tile == null) continue;
+                 float size = R(2.5f, h > 90 ? 16 : 8);
+                 float m = Mathf.Max(mesh.bounds.size.x, mesh.bounds.size.z);
+                 float k1 = size / Mathf.Max(.1f, m);
+-                b.localScale = new Vector3(k1 * R(.8f, 1.3f), k1 * R(.7f, 1.2f), k1 * R(.8f, 1.3f));
+-                b.position = new Vector3(p.x, h - size * .15f, p.z);
+-                b.rotation = Quaternion.Euler(R(-12, 12), R(0, 360), R(-12, 12));
++                var scale = new Vector3(k1 * R(.8f, 1.3f), k1 * R(.7f, 1.2f), k1 * R(.8f, 1.3f));
++                var at = new Vector3(p.x, h - size * .15f, p.z);
++                var turn = Quaternion.Euler(R(-12, 12), R(0, 360), R(-12, 12));
++                tile.Boulders.Add((model, at, scale, turn));
+                 placed++;
+             }
+             HillBoulders = placed;
+@@ -682,58 +767,18 @@ namespace Autobahn
+ 
+         public static int HillBoulders;
+ 
+-        // --- streaming -------------------------------------------------------------------------
+-        float timer;
+-        bool shownAll;
++        // --- streaming (WorldStreamer does the work) ------------------------------------------------
+ 
+-        void Update()
+-        {
+-            timer -= Time.unscaledDeltaTime;
+-            if (timer > 0) return;
+-            timer = .1f;
+-            Stream(RoadWorld.ShowAll || shownAll);
+-            shownAll = RoadWorld.ShowAll;
+-        }
+-
+-        Vector3 lastStream = new(1e9f, 0, 0);
+-
+-        // Every ground tile on (the map picture), or back to what the car needs.
++        // The whole island built (the map picture); `false` leaves the streaming to clear up
++        // behind it once the picture is taken.
+         public void ShowEverything(bool on)
+         {
+-            if (on) { foreach (var t in tiles) if (t && !t.gameObject.activeSelf) t.gameObject.SetActive(true); if (town) town.gameObject.SetActive(true); }
+-            else Stream(true);
++            if (on) WorldStreamer.Active?.BuildAll();
++            else WorldStreamer.Active?.Refresh(false);
+         }
+ 
+-        public void Stream(bool all)
+-        {
+-            if (player == null) return;
+-            Vector3 p = Focus.Of(player);
+-            bool jumped = all || (p - lastStream).sqrMagnitude > 250 * 250;
+-            lastStream = p;
+-            float reach = GraphicsQuality.FarReach + 200 + Focus.Extra(player);
+-            Transform next = null;
+-            float best = float.MaxValue;
+-            foreach (var t in tiles)
+-            {
+-                Vector3 c = t.position + new Vector3(Tile / 2, 0, Tile / 2);
+-                float d = new Vector2(c.x - p.x, c.z - p.z).magnitude;
+-                // The ground under the parked car stays too (it must not drop through the world).
+-                float dCar = new Vector2(c.x - player.position.x, c.z - player.position.z).magnitude;
+-                bool active = RoadWorld.ShowAll || d < reach || dCar < Tile * 1.5f;
+-                if (t.gameObject.activeSelf == active) continue;
+-                if (jumped) { t.gameObject.SetActive(active); continue; }
+-                if (d < best) { best = d; next = t; }
+-            }
+-            if (next) next.gameObject.SetActive(!next.gameObject.activeSelf);
+-            if (town)
+-            {
+-                Vector3 tc = Route.Center(Island.TownS);
+-                // A 150 m margin both ways: driving along the edge no longer switches the whole town on and off.
+-                float r = reach + 400 + (town.gameObject.activeSelf ? 150 : 0);
+-                bool near = RoadWorld.ShowAll || (tc - p).sqrMagnitude < r * r;
+-                if (town.gameObject.activeSelf != near) town.gameObject.SetActive(near);
+-            }
+-        }
++        // `all`: act on a jump at once (a new run, a teleport).
++        public void Stream(bool all) => WorldStreamer.Active?.Refresh(all);
+ 
+         void OnDestroy()
+         {
+diff --git a/Assets/Drive/Scripts/World/Knockable.cs b/Assets/Drive/Scripts/World/Knockable.cs
+index c22dd1f..50f1a3b 100644
+--- a/Assets/Drive/Scripts/World/Knockable.cs
++++ b/Assets/Drive/Scripts/World/Knockable.cs
+@@ -122,6 +122,8 @@ namespace Autobahn
+                 k.anchorHome = anchor.localPosition;
+             }
+             Count++;
++            // Props of unloaded tiles leave empty entries behind: cleared now and then.
++            if (all.Count >= 1024 && (all.Count & 1023) == 0) all.RemoveAll(x => !x);
+             all.Add(k);
+             if (!hub)
+             {
+@@ -304,6 +306,8 @@ namespace Autobahn
+         void OnDestroy()
+         {
+             loose.Remove(this);
++            // Its tile was unloaded (world streaming): the count is of props that exist.
++            Count--;
+         }
+     }
+ 
+diff --git a/Assets/Drive/Scripts/World/RoadWorld.cs b/Assets/Drive/Scripts/World/RoadWorld.cs
+index dfd49d5..7804f9a 100644
+--- a/Assets/Drive/Scripts/World/RoadWorld.cs
++++ b/Assets/Drive/Scripts/World/RoadWorld.cs
+@@ -3,11 +3,14 @@ using UnityEngine;
+ 
+ namespace Autobahn
+ {
++    // The loop road round the island in 200 m chunks: asphalt, markings, guardrails, signs,
++    // gantries and the filling station. Each chunk is a streaming unit (WorldStreamer): built when
++    // the player comes near, destroyed once far behind, the same every time.
+     public sealed class RoadWorld : MonoBehaviour
+     {
+-        readonly List<Transform> chunks = new();
++        readonly List<StreamUnit> chunks = new();
+         Transform player;
+-        float timer;
++        WorldStreamer streamer;
+         // Distance mode builds one loop of city this long and keeps moving it ahead of the car.
+         public const float EndlessSpan = 2400;
+         public int ChunkCount => chunks.Count;
+@@ -15,19 +18,15 @@ namespace Autobahn
+         IslandWorld island;
+         public IslandWorld Island => island;
+ 
++        // Distance mode: the island and its road go (they are built again on the way back).
+         public void Clear()
+         {
+-            foreach (var c in chunks)
+-                if (c) Destroy(c.gameObject);
+-            chunks.Clear();
++            if (streamer) streamer.UnloadAll();
+             if (island) island.gameObject.SetActive(false);
+         }
+ 
+         public void Rebuild()
+         {
+-            foreach (var c in chunks)
+-                if (c) Destroy(c.gameObject);
+-            chunks.Clear();
+             Build(player);
+         }
+ 
+@@ -41,6 +40,7 @@ namespace Autobahn
+                 gameObject.AddComponent<TrafficSignals>();
+             if (Route.Endless)
+                 return;
++            streamer = WorldStreamer.Ensure(gameObject, follow);
+             if (island == null)
+             {
+                 island = new GameObject("Island").AddComponent<IslandWorld>();
+@@ -49,69 +49,88 @@ namespace Autobahn
+             }
+             else
+                 island.gameObject.SetActive(true);
+-            Random.InitState(91827);
+-            float total = Route.Length, town = Autobahn.Island.TownS;
+-            for (float start = 0; start < total; start += 200)
++            if (chunks.Count == 0)
+             {
+-                float end = Mathf.Min(total, start + 200);
+-                var chunk = new GameObject("Road " + start.ToString("00000")).transform;
+-                chunk.SetParent(transform, false);
+-                chunk.position = Route.Center(start);
+-                chunks.Add(chunk);
+-                Ribbon(chunk, start, end, -7.2f, 7.2f, 0, Art.Asphalt, true);
+-                Ribbon(chunk, start, end, -7.2f, -6.1f, .005f, Art.Shoulder, false);
+-                Ribbon(chunk, start, end, 6.1f, 7.2f, .005f, Art.Shoulder, false);
+-                for (float z = start; z < end; z += 12)
+-                {
+-                    for (int lane = 0; lane < 2; lane++)
+-                        Block(chunk, "Lane marking", z + 2.4f, (lane == 0 ? -.5f : .5f) * Route.LaneWidth, .008f, new(.13f, .012f, 4.8f), Art.Line);
+-                    bool inTown = Mathf.Abs(z - town) < Autobahn.Island.TownHalf + 30;
+-                    for (int s = -1; s <= 1; s += 2)
+-                    {
+-                        Block(chunk, "Edge line", z + 6, s * 5.85f, .008f, new(.14f, .012f, 12.2f), Art.Line);
+-                        if (z < 30 || z > total - 42 || inTown || Station.Entrance(z, s))
+-                            continue;
+-                        // Each 12 m of guardrail is one breakable section: solid (a car slower than
+-                        // 30 km/h and people on foot are stopped), faster it is torn off and falls.
+-                        Guardrail(chunk, z + 6, s * 7.5f);
+-                        if (((int)z) % 48 == 0)
+-                            Delineator(chunk, z, s * 7);
+-                    }
+-                }
+-
+-                // Roadside signs on the shoulder (speed limit, caution, attention in turn): they
+-                // fall over when driven into, like the city's signs.
+-                for (float z = start + 90; z < end; z += 200)
++                float total = Route.Length;
++                int index = 0;
++                for (float start = 0; start < total; start += 200, index++)
+                 {
+-                    int n = Mathf.RoundToInt(z / 200);
+-                    if (z < 60 || z > total - 60 || Mathf.Abs(z - town) < Autobahn.Island.TownHalf + 40 || Station.Entrance(z, 1)) continue;
+-                    string name = (n % 3) switch { 0 => "Maximum_Sign", 1 => "Caution_Sign", _ => "Attention_Sign" };
+-                    Vector3 foot = Route.Center(z) + Route.Right(z) * 6.75f;
+-                    Art.RoadSign(chunk, chunk.InverseTransformPoint(foot) + Vector3.up * .02f, -Route.Forward(z), name, 2.3f);
++                    float from = start, to = Mathf.Min(total, start + 200);
++                    int seed = 91827 + index * 104729;
++                    // The station's forecourt and planting reach about 75 m off the road.
++                    var points = new List<Vector3>();
++                    for (float z = from; z <= to; z += 10) points.Add(Route.Center(z));
++                    points.Add(Route.Center(to));
++                    var area = WorldStreamer.AreaOf(points, 80);
++                    chunks.Add(streamer.Add(new StreamUnit("Road " + start.ToString("00000"), transform, Route.Center(start), area,
++                        chunk => WorldStreamer.Seeded(Chunk(chunk, from, to), seed))));
+                 }
++            }
++            // The ground round the car now, the rest as the player looks about.
++            streamer.Warm();
++        }
+ 
+-                // Direction boards over the road.
+-                if (start % 1600 == 800)
++        // One chunk, a part per frame: the surfaces, the markings and guardrails 48 m at a time,
++        // the signs, the station, then the merge.
++        IEnumerator<object> Chunk(Transform chunk, float start, float end)
++        {
++            float total = Route.Length, town = Autobahn.Island.TownS;
++            Ribbon(chunk, start, end, -7.2f, 7.2f, 0, Art.Asphalt, true);
++            Ribbon(chunk, start, end, -7.2f, -6.1f, .005f, Art.Shoulder, false);
++            Ribbon(chunk, start, end, 6.1f, 7.2f, .005f, Art.Shoulder, false);
++            yield return null;
++            int rows = 0;
++            for (float z = start; z < end; z += 12)
++            {
++                for (int lane = 0; lane < 2; lane++)
++                    Block(chunk, "Lane marking", z + 2.4f, (lane == 0 ? -.5f : .5f) * Route.LaneWidth, .008f, new(.13f, .012f, 4.8f), Art.Line);
++                bool inTown = Mathf.Abs(z - town) < Autobahn.Island.TownHalf + 30;
++                for (int s = -1; s <= 1; s += 2)
+                 {
+-                    float z = start + 100;
+-                    for (int s = -1; s <= 1; s += 2)
+-                        Block(chunk, "Gantry", z, s * 8.4f, 4.4f, new(.26f, 8.8f, .3f), Art.Steel);
+-                    Block(chunk, "Gantry beam", z, 0, 8.7f, new(17, .3f, .35f), Art.Steel);
+-                    Block(chunk, "Destination board", z, 0, 7.3f, new(9.5f, 2.2f, .17f), Art.Blue);
+-                    string text = z < town - 400
+-                        ? $"СЕВЕРНЫЙ   {(town - z) / 1000:0} км\n↑     АЗС     ↑"
+-                        : $"ГОРОД   {(total - z) / 1000:0} км\n↑     ПОРТ     ↑";
+-                    var sign = Art.Text(chunk, text, chunk.InverseTransformPoint(Route.Center(z) + Vector3.up * 7.3f - Route.Forward(z) * .11f), .40f, Color.white);
+-                    sign.transform.rotation = Route.Rotation(z);
++                    Block(chunk, "Edge line", z + 6, s * 5.85f, .008f, new(.14f, .012f, 12.2f), Art.Line);
++                    if (z < 30 || z > total - 42 || inTown || Station.Entrance(z, s))
++                        continue;
++                    // Each 12 m of guardrail is one breakable section: solid (a car slower than
++                    // 30 km/h and people on foot are stopped), faster it is torn off and falls.
++                    Guardrail(chunk, z + 6, s * 7.5f);
++                    if (((int)z) % 48 == 0)
++                        Delineator(chunk, z, s * 7);
+                 }
++                if (++rows % 4 == 0) yield return null;
++            }
+ 
+-                Station.Build(chunk, start, end);
++            // Roadside signs on the shoulder (speed limit, caution, attention in turn): they
++            // fall over when driven into, like the city's signs.
++            for (float z = start + 90; z < end; z += 200)
++            {
++                int n = Mathf.RoundToInt(z / 200);
++                if (z < 60 || z > total - 60 || Mathf.Abs(z - town) < Autobahn.Island.TownHalf + 40 || Station.Entrance(z, 1)) continue;
++                string name = (n % 3) switch { 0 => "Maximum_Sign", 1 => "Caution_Sign", _ => "Attention_Sign" };
++                Vector3 foot = Route.Center(z) + Route.Right(z) * 6.75f;
++                Art.RoadSign(chunk, chunk.InverseTransformPoint(foot) + Vector3.up * .02f, -Route.Forward(z), name, 2.3f);
++            }
+ 
+-                Art.Combine(chunk);
+-                Art.Strip(chunk);
+-                chunk.gameObject.SetActive(true);
++            // Direction boards over the road.
++            if (start % 1600 == 800)
++            {
++                float z = start + 100;
++                for (int s = -1; s <= 1; s += 2)
++                    Block(chunk, "Gantry", z, s * 8.4f, 4.4f, new(.26f, 8.8f, .3f), Art.Steel);
++                Block(chunk, "Gantry beam", z, 0, 8.7f, new(17, .3f, .35f), Art.Steel);
++                Block(chunk, "Destination board", z, 0, 7.3f, new(9.5f, 2.2f, .17f), Art.Blue);
++                string text = z < town - 400
++                    ? $"СЕВЕРНЫЙ   {(town - z) / 1000:0} км\n↑     АЗС     ↑"
++                    : $"ГОРОД   {(total - z) / 1000:0} км\n↑     ПОРТ     ↑";
++                var sign = Art.Text(chunk, text, chunk.InverseTransformPoint(Route.Center(z) + Vector3.up * 7.3f - Route.Forward(z) * .11f), .40f, Color.white);
++                sign.transform.rotation = Route.Rotation(z);
+             }
+-            lastStreamZ = float.MaxValue;
++            yield return null;
++
++            Station.Build(chunk, start, end);
++            yield return null;
++
++            Art.Combine(chunk);
++            Art.Strip(chunk);
+         }
+ 
+         void Lamp(Transform chunk, float z, float x, float height, float intensity, float range)
+@@ -184,43 +203,7 @@ namespace Autobahn
+             Art.MeshObject(chunk, "Continuous surface", Art.Mesh(v.ToArray(), tris.ToArray(), uv.ToArray()), mat, collision);
+         }
+ 
+-        float lastStreamZ;
+-        Vector3 lastStream = new(1e9f, 0, 0);
+-        // The M map shows the whole island, so every chunk is switched on while it is open.
++        // The M map and the map picture are open: nothing is unloaded meanwhile (see WorldStreamer).
+         public static bool ShowAll;
+-        bool shownAll;
+-
+-        void Update()
+-        {
+-            if (Route.Endless)
+-                return;
+-            timer -= Time.unscaledDeltaTime;
+-            if (timer > 0 || player == null)
+-                return;
+-            // Switch at most one chunk per check, so streaming never lands several
+-            // hundred colliders and renderers on the same frame.
+-            timer = .08f;
+-            Vector3 p = Focus.Of(player);
+-            // A jump (restart, recovery, test teleport) switches everything at once.
+-            bool jumped = (p - lastStream).sqrMagnitude > 250 * 250 || ShowAll || shownAll || lastStreamZ == float.MaxValue;
+-            shownAll = ShowAll;
+-            lastStream = p;
+-            lastStreamZ = 0;
+-            Transform next = null;
+-            float best = float.MaxValue;
+-            float reach = GraphicsQuality.FarReach + 150 + Focus.Extra(player);
+-            foreach (var c in chunks)
+-            {
+-                if (!c) continue;
+-                Vector3 mid = c.position;
+-                float d = new Vector2(mid.x - p.x, mid.z - p.z).magnitude - 100;
+-                float dCar = new Vector2(mid.x - player.position.x, mid.z - player.position.z).magnitude - 100;
+-                bool active = ShowAll || d < reach || dCar < 250;
+-                if (c.gameObject.activeSelf == active) continue;
+-                if (jumped) { c.gameObject.SetActive(active); continue; }
+-                if (d < best) { best = d; next = c; }
+-            }
+-            if (next) next.gameObject.SetActive(!next.gameObject.activeSelf);
+-        }
+     }
+ }
+diff --git a/Assets/Drive/Scripts/World/WorldStreamer.cs b/Assets/Drive/Scripts/World/WorldStreamer.cs
+new file mode 100644
+index 0000000..dcdaed3
+--- /dev/null
++++ b/Assets/Drive/Scripts/World/WorldStreamer.cs
+@@ -0,0 +1,510 @@
++using System.Collections;
++using System.Collections.Generic;
++using UnityEngine;
++
++namespace Autobahn
++{
++    // One piece of the island that only exists while the player is near it: a ground tile, a
++    // road chunk, a city block, the town. It is built from its own seed, so it comes back exactly
++    // the same when the player returns (online, a friend's broken props are found by where they
++    // stand, see Net.WorldNet).
++    public sealed class StreamUnit
++    {
++        public readonly string Name;
++        public readonly Transform Parent;
++        public readonly Vector3 Origin;
++        // The ground it covers (world x/z): distances are measured to its nearest edge.
++        public readonly Rect Area;
++        // Builds the unit under the root it is given, yielding between parts so a big unit is
++        // spread over several frames.
++        public readonly System.Func<Transform, IEnumerator> Steps;
++        // Called just before the root is destroyed (trees, lights and other links go first).
++        public System.Action<Transform> Unloading;
++        // Never unloaded (the garage every run starts from).
++        public bool Keep;
++
++        public Transform Root { get; internal set; }
++        public bool Ready { get; internal set; }
++        public int Builds { get; internal set; }
++        internal IEnumerator Job;
++        internal HashSet<Mesh> Owned;
++        internal int SweepFrame;
++        internal float Distance;
++
++        public StreamUnit(string name, Transform parent, Vector3 origin, Rect area, System.Func<Transform, IEnumerator> steps)
++        {
++            Name = name;
++            Parent = parent;
++            Origin = origin;
++            Area = area;
++            Steps = steps;
++        }
++    }
++
++    // Builds the island around the player and throws away what is left behind. The old world was
++    // built whole at start (tens of seconds, all of it in memory) and only switched pieces on and
++    // off. Now a piece is built when it comes within the view distance, a few milliseconds a
++    // frame and at most one finished piece a frame, and destroyed with its meshes once it is well
++    // beyond it. After a jump (a new run, a teleport, a test) the ground round the player is built
++    // at once, so nobody falls through a world that is still on its way.
++    [DefaultExecutionOrder(-400)]
++    public sealed class WorldStreamer : MonoBehaviour
++    {
++        public static WorldStreamer Active { get; private set; }
++
++        // Building time per frame, in milliseconds (a single part may run over).
++        public static float BudgetMs = 4;
++        // How far beyond the view distance a built piece is kept (driving along the edge of the
++        // reach must not build and destroy the same piece over and over).
++        public static float Margin = 300;
++        // Built at once, within the frame, after a jump.
++        public static float UrgentRadius = 300;
++        // Always built round the focus while moving: a safety net if building falls behind.
++        public const float NearRadius = 90;
++        // The ground round the car stays while the driver walks, flies or sails away from it.
++        public const float CarKeep = 160;
++        const float Jump = 250;
++
++        readonly List<StreamUnit> units = new();
++        readonly List<StreamUnit> queue = new();
++        readonly List<StreamUnit> drop = new();
++        static readonly System.Comparison<StreamUnit> nearestFirst = (a, b) => a.Distance.CompareTo(b.Distance);
++        Transform car;
++        Rigidbody carBody;
++        StreamUnit current;
++        Vector3 lastFocus;
++        bool placed;
++        float nextPass;
++        int unloadedSinceSweep;
++
++        // Numbers for the logs and the automated checks.
++        public int Count => units.Count;
++        public int Standing { get; private set; }
++        public int Builds { get; private set; }
++        public int Unloads { get; private set; }
++        public float WorstStepMs { get; private set; }
++        public float BuildMs { get; private set; }
++
++        public static WorldStreamer Ensure(GameObject host, Transform follow)
++        {
++            var s = host.GetComponent<WorldStreamer>();
++            if (!s) s = host.AddComponent<WorldStreamer>();
++            s.car = follow;
++            s.carBody = follow ? follow.GetComponent<Rigidbody>() : null;
++            Active = s;
++            // The automated checks look around right after a teleport: more of the world at once.
++            if (ProfileStore.Testing) UrgentRadius = Mathf.Max(UrgentRadius, 700);
++            return s;
++        }
++
++        void OnDestroy()
++        {
++            if (Active == this) Active = null;
++        }
++
++        public StreamUnit Add(StreamUnit unit)
++        {
++            units.Add(unit);
++            return unit;
++        }
++
++        // Unloads a unit and forgets it (its owner is going away).
++        public void Remove(StreamUnit unit)
++        {
++            if (unit.Root || unit.Job != null) Unload(unit);
++            units.Remove(unit);
++            queue.Remove(unit);
++            drop.Remove(unit);
++        }
++
++        public float Reach => GraphicsQuality.FarReach + 100 + Focus.Extra(car);
++
++        static float Distance(Rect r, Vector3 p)
++        {
++            float dx = Mathf.Max(r.xMin - p.x, 0, p.x - r.xMax);
++            float dz = Mathf.Max(r.yMin - p.z, 0, p.z - r.yMax);
++            return Mathf.Sqrt(dx * dx + dz * dz);
++        }
++
++        Vector3 CarPoint() => carBody ? carBody.position : car ? car.position : Vector3.zero;
++
++        // --- the frame loop ----------------------------------------------------------------------
++
++        bool Paused => Route.Endless || !car || !isActiveAndEnabled;
++
++        // Physics runs before Update: a car put down somewhere new gets its ground before its
++        // first step there.
++        void FixedUpdate()
++        {
++            if (!Paused) Guard();
++        }
++
++        void Update()
++        {
++            if (Paused) return;
++            Guard();
++            if (Time.unscaledTime >= nextPass)
++            {
++                nextPass = Time.unscaledTime + .1f;
++                Pass();
++            }
++            bool busy = Work(BudgetMs);
++            // Destroying is cheaper than building, but not free: one unit, and not on every
++            // frame that also builds.
++            if (!busy || Time.frameCount % 4 == 0) UnloadOne();
++            Sweep();
++        }
++
++        // Builds what is needed right now: everything close by after a jump, and whatever the
++        // player is about to reach if building has fallen behind (a fast plane, a slow computer).
++        void Guard()
++        {
++            Vector3 f = Focus.Of(car);
++            if (!placed || (f - lastFocus).sqrMagnitude > Jump * Jump)
++            {
++                placed = true;
++                lastFocus = f;
++                var clock = System.Diagnostics.Stopwatch.StartNew();
++                int before = Builds;
++                BuildAround(f, UrgentRadius);
++                BuildAround(CarPoint(), NearRadius);
++                foreach (var u in units)
++                    if (u.Keep && !u.Ready) Finish(u);
++                nextPass = 0;
++                if (Builds > before) Debug.Log($"AUTOBAHN streaming jump to {f}: built {Builds - before} pieces in {clock.ElapsedMilliseconds} ms");
++                return;
++            }
++            lastFocus = f;
++            BuildAround(f, NearRadius);
++        }
++
++        // Decides what should stand: within the reach of the focus (and round the parked car)
++        // is wanted, nearest first; well beyond it goes.
++        void Pass()
++        {
++            Vector3 f = Focus.Of(car), c = CarPoint();
++            float reach = Reach;
++            queue.Clear();
++            drop.Clear();
++            foreach (var u in units)
++            {
++                float d = Distance(u.Area, f), dc = Distance(u.Area, c);
++                u.Distance = Mathf.Min(d, dc);
++                bool standing = u.Root != null;
++                if (u.Keep || d < reach || dc < CarKeep)
++                {
++                    if (!u.Ready) queue.Add(u);
++                }
++                else if (standing && !RoadWorld.ShowAll && d > reach + Margin && dc > CarKeep + Margin)
++                    drop.Add(u);
++            }
++            queue.Sort(nearestFirst);
++        }
++
++        // Runs build steps for up to `budgetMs`; at most one unit is finished per frame.
++        bool Work(float budgetMs)
++        {
++            if (current != null && current.Job == null) current = null;
++            if (current == null) current = Next();
++            if (current == null) return false;
++            var clock = System.Diagnostics.Stopwatch.StartNew();
++            while (current != null && clock.Elapsed.TotalMilliseconds < budgetMs)
++            {
++                if (Step(current)) continue;
++                current = null;
++                break;
++            }
++            return true;
++        }
++
++        StreamUnit Next()
++        {
++            for (int i = 0; i < queue.Count; i++)
++            {
++                var u = queue[i];
++                if (u.Ready) continue;
++                queue.RemoveAt(i);
++                if (u.Job == null) Begin(u);
++                return u;
++            }
++            return null;
++        }
++
++        void UnloadOne()
++        {
++            if (drop.Count == 0) return;
++            // The farthest first.
++            int far = 0;
++            for (int i = 1; i < drop.Count; i++)
++                if (drop[i].Distance > drop[far].Distance) far = i;
++            var u = drop[far];
++            drop.RemoveAt(far);
++            if (u.Root || u.Job != null) Unload(u);
++        }
++
++        // --- building and unloading ------------------------------------------------------------
++
++        void Begin(StreamUnit u)
++        {
++            var root = new GameObject(u.Name).transform;
++            root.SetParent(u.Parent, false);
++            root.position = u.Origin;
++            u.Root = root;
++            u.Ready = false;
++            u.Job = u.Steps(root);
++        }
++
++        // One part of a unit. Counters the automated checks read (parks, guardrails, NYC
++        // buildings...) describe the world, not how often it was built: a rebuild leaves them.
++        bool Step(StreamUnit u)
++        {
++            if (u.Job == null) return false;
++            var tally = Tally.Take();
++            var clock = System.Diagnostics.Stopwatch.StartNew();
++            bool more;
++            try { more = u.Job.MoveNext(); }
++            catch (System.Exception e)
++            {
++                Debug.LogException(e);
++                more = false;
++            }
++            finally
++            {
++                if (u.Builds > 0) tally.Restore();
++            }
++            float ms = (float)clock.Elapsed.TotalMilliseconds;
++            BuildMs += ms;
++            if (ms > WorstStepMs) WorstStepMs = ms;
++            if (!more) Done(u);
++            return more;
++        }
++
++        void Done(StreamUnit u)
++        {
++            u.Job = null;
++            u.Ready = true;
++            u.Builds++;
++            Builds++;
++            Standing++;
++            // Everything the build made for this unit alone, including the pieces Art.Strip is
++            // about to destroy: their meshes go a frame later, the rest when the unit goes.
++            u.Owned = OwnedMeshes(u.Root);
++            u.SweepFrame = Time.frameCount + 1;
++        }
++
++        void Finish(StreamUnit u)
++        {
++            if (u.Ready) return;
++            if (u.Job == null) Begin(u);
++            while (Step(u)) { }
++            if (current == u) current = null;
++        }
++
++        void Unload(StreamUnit u)
++        {
++            if (u.Ready) Standing--;
++            if (current == u) current = null;
++            var root = u.Root;
++            try { u.Unloading?.Invoke(root); }
++            catch (System.Exception e) { Debug.LogException(e); }
++            if (root)
++            {
++                var meshes = OwnedMeshes(root);
++                if (u.Owned != null) meshes.UnionWith(u.Owned);
++                Destroy(root.gameObject);
++                foreach (var m in meshes)
++                    if (m) Destroy(m);
++            }
++            u.Root = null;
++            u.Job = null;
++            u.Ready = false;
++            u.Owned = null;
++            Unloads++;
++            unloadedSinceSweep++;
++        }
++
++        // A frame after a unit is finished: the meshes of the pieces Art.Strip destroyed are freed
++        // (they were copies made only to be merged, and used to stay in memory for good). Now and
++        // then, after many unloads, whatever else nobody uses any more (small leftovers).
++        void Sweep()
++        {
++            foreach (var u in units)
++            {
++                if (u.SweepFrame == 0 || u.SweepFrame > Time.frameCount || u.Owned == null || !u.Root) continue;
++                u.SweepFrame = 0;
++                var live = OwnedMeshes(u.Root);
++                foreach (var m in u.Owned)
++                    if (m && !live.Contains(m)) Destroy(m);
++                u.Owned = live;
++            }
++            if (unloadedSinceSweep >= 60 && RoadWorld.ShowAll)
++            {
++                unloadedSinceSweep = 0;
++                Resources.UnloadUnusedAssets();
++            }
++        }
++
++        // Meshes made at run time for this unit alone: merged batches (unnamed), knocked-prop
++        // batches, unit-cube copies with metre UVs ("(Clone)") and the island ground. Imported
++        // models, trees and the parked-car templates are shared and never freed here.
++        static HashSet<Mesh> OwnedMeshes(Transform root)
++        {
++            var set = new HashSet<Mesh>();
++            if (!root) return set;
++            foreach (var f in root.GetComponentsInChildren<MeshFilter>(true))
++                if (!f.GetComponent<TextMesh>() && !UnderParkedModel(f.transform, root)) Own(set, f.sharedMesh);
++            foreach (var c in root.GetComponentsInChildren<MeshCollider>(true))
++                Own(set, c.sharedMesh);
++            return set;
++        }
++
++        static void Own(HashSet<Mesh> set, Mesh m)
++        {
++            if (!m) return;
++            string n = m.name;
++            if (n.Length == 0 || n.EndsWith("(Clone)") || n.StartsWith("Knockables ") || n == "Island ground")
++                set.Add(m);
++        }
++
++        static bool UnderParkedModel(Transform t, Transform root)
++        {
++            for (; t && t != root; t = t.parent)
++                if (t.name == "Parked model") return true;
++            return false;
++        }
++
++        // --- asked for by others ---------------------------------------------------------------
++
++        // Builds, within this frame, every unit that reaches within `radius` of `at`.
++        public int BuildAround(Vector3 at, float radius)
++        {
++            int n = 0;
++            for (int i = 0; i < units.Count; i++)
++            {
++                var u = units[i];
++                if (u.Ready || Distance(u.Area, at) > radius) continue;
++                Finish(u);
++                n++;
++            }
++            return n;
++        }
++
++        // The whole island (the map picture). Slow: this is what the old start-up did.
++        public void BuildAll()
++        {
++            var clock = System.Diagnostics.Stopwatch.StartNew();
++            int n = 0;
++            foreach (var u in units)
++                if (!u.Ready) { Finish(u); n++; }
++            Debug.Log($"AUTOBAHN streaming: built all {units.Count} pieces ({n} new) in {clock.ElapsedMilliseconds} ms");
++        }
++
++        // Distance mode: the island goes away (the garage stays).
++        public void UnloadAll()
++        {
++            foreach (var u in units)
++                if (!u.Keep && (u.Root || u.Job != null)) Unload(u);
++            queue.Clear();
++            drop.Clear();
++            current = null;
++            placed = false;
++        }
++
++        // A pass now, and a jump check on the next frame (Stream(true) of the old code).
++        public void Refresh(bool jump)
++        {
++            nextPass = 0;
++            if (jump) placed = false;
++        }
++
++        // Builds, right now, what the player needs to start: the ground round the car and the
++        // pieces that always stand (the garage a run starts in). The rest follows frame by frame.
++        public void Warm()
++        {
++            placed = false;
++            if (!Paused) Guard();
++        }
++
++        // True when everything in this x/z rectangle is built (the M map draws it live).
++        public bool Covers(Rect area)
++        {
++            foreach (var u in units)
++                if (!u.Ready && u.Area.Overlaps(area)) return false;
++            return true;
++        }
++
++        public string Report() => $"{Standing}/{units.Count} pieces standing, {Builds} built, {Unloads} unloaded, {BuildMs / 1000:0.0} s building, worst step {WorstStepMs:0.0} ms";
++
++        // --- helpers for the builders --------------------------------------------------------------
++
++        // Runs `steps` with `enter` before and `exit` after every part (static state such as a
++        // capture list or a flag must only be set while this unit's own code runs).
++        public static IEnumerator Scoped(IEnumerator steps, System.Action enter, System.Action exit)
++        {
++            while (true)
++            {
++                bool more;
++                enter();
++                try { more = steps.MoveNext(); }
++                finally { exit(); }
++                if (!more) yield break;
++                yield return steps.Current;
++            }
++        }
++
++        // Runs `steps` with UnityEngine.Random seeded for every part: the result does not depend
++        // on what else was built before, or in between.
++        public static IEnumerator Seeded(IEnumerator steps, int seed)
++        {
++            int part = 0;
++            while (true)
++            {
++                bool more;
++                var saved = Random.state;
++                Random.InitState(unchecked(seed + part++ * 7919));
++                try { more = steps.MoveNext(); }
++                finally { Random.state = saved; }
++                if (!more) yield break;
++                yield return steps.Current;
++            }
++        }
++
++        // The x/z rectangle of a set of points, grown by `margin`.
++        public static Rect AreaOf(IEnumerable<Vector3> points, float margin)
++        {
++            float x0 = float.MaxValue, x1 = float.MinValue, z0 = float.MaxValue, z1 = float.MinValue;
++            foreach (var p in points)
++            {
++                x0 = Mathf.Min(x0, p.x); x1 = Mathf.Max(x1, p.x);
++                z0 = Mathf.Min(z0, p.z); z1 = Mathf.Max(z1, p.z);
++            }
++            return Rect.MinMaxRect(x0 - margin, z0 - margin, x1 + margin, z1 + margin);
++        }
++
++        // Counters that building bumps (the automated checks compare them with fixed numbers).
++        struct Tally
++        {
++            int nyc, parkBlocks, parkFences, parkTrees, parkSections, guardrails;
++
++            public static Tally Take() => new()
++            {
++                nyc = GridCity.NycPlaced,
++                parkBlocks = GridCity.BigParkBlocks,
++                parkFences = GridCity.ParkFences,
++                parkTrees = GridCity.ParkTrees,
++                parkSections = Fences.ParkSections,
++                guardrails = RoadWorld.GuardrailSections,
++            };
++
++            public void Restore()
++            {
++                GridCity.NycPlaced = nyc;
++                GridCity.BigParkBlocks = parkBlocks;
++                GridCity.ParkFences = parkFences;
++                GridCity.ParkTrees = parkTrees;
++                Fences.ParkSections = parkSections;
++                RoadWorld.GuardrailSections = guardrails;
++            }
++        }
++    }
++}
+diff --git a/Assets/Drive/Scripts/World/WorldStreamer.cs.meta b/Assets/Drive/Scripts/World/WorldStreamer.cs.meta
+new file mode 100644
+index 0000000..49d7734
+--- /dev/null
++++ b/Assets/Drive/Scripts/World/WorldStreamer.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 4bea4ce4cdc243ac8088b53971419709
+\ No newline at end of file

@@ -1,0 +1,544 @@
+diff --git a/Assets/Drive/Scripts/Net/RemoteAvatar.cs b/Assets/Drive/Scripts/Net/RemoteAvatar.cs
+index 19e117a..dd2e716 100644
+--- a/Assets/Drive/Scripts/Net/RemoteAvatar.cs
++++ b/Assets/Drive/Scripts/Net/RemoteAvatar.cs
+@@ -12,6 +12,7 @@ namespace Autobahn.Net
+         public bool Riding => RideSlot >= 0;
+         public int RideSlot { get; private set; } = -1;
+         HumanRig rig;
++        WeaponHold hold;
+         CapsuleCollider body;
+         Vector3 target, velocity;
+         float yaw, targetYaw, pitch;
+@@ -28,6 +29,8 @@ namespace Autobahn.Net
+             var a = go.AddComponent<RemoteAvatar>();
+             a.Slot = slot;
+             a.rig = HumanRig.Create(go.transform, colour, true);
++            a.hold = go.AddComponent<WeaponHold>();
++            a.hold.Rig = a.rig;
+             a.body = go.AddComponent<CapsuleCollider>();
+             a.body.height = 1.8f;
+             a.body.radius = .35f;
+@@ -96,6 +99,7 @@ namespace Autobahn.Net
+                 return;
+             }
+             rig.Shoot();
++            hold.Kick(def, false);
+             Vector3 from = gun ? gun.TransformPoint(muzzle) : transform.position + Vector3.up * 1.4f;
+             Weapons.Flash(from, (at - from).normalized);
+             Weapons.Tracer(from, at);
+@@ -110,6 +114,7 @@ namespace Autobahn.Net
+             transform.position = Vector3.Lerp(transform.position, predicted, 1 - Mathf.Exp(-Time.deltaTime * 14));
+             yaw = Mathf.LerpAngle(yaw, targetYaw, 1 - Mathf.Exp(-Time.deltaTime * 16));
+             transform.rotation = Quaternion.Euler(0, yaw, 0);
++            rig.AimDirection = Quaternion.Euler(pitch, yaw, 0) * Vector3.forward;
+         }
+ 
+         void LateUpdate()
+@@ -122,11 +127,13 @@ namespace Autobahn.Net
+                 gun = weapon > 0 && weapon < Weapons.All.Length ? Weapons.Model(Weapons.All[weapon], transform, out muzzle) : null;
+                 gunFor = weapon;
+             }
+-            if (!gun) return;
+-            gun.gameObject.SetActive(!Dead && !Riding && !rig.Kneeling);
+-            var aim = Quaternion.Euler(pitch, yaw, 0);
+-            Vector3 hand = rig.RightHand ? rig.RightHand.position : transform.position + Vector3.up * 1.3f;
+-            gun.SetPositionAndRotation(hand + aim * new Vector3(-.02f, .03f, .05f), aim);
++            if (gun) gun.gameObject.SetActive(!Dead && !Riding && !rig.Kneeling);
++            // In the right hand along their aim, kicking on their shots: placed by WeaponHold
++            // after the body is animated.
++            hold.Gun = gun;
++            hold.Muzzle = muzzle;
++            hold.Def = weapon >= 0 && weapon < Weapons.All.Length ? Weapons.All[weapon] : null;
++            hold.Aim = Quaternion.Euler(pitch, yaw, 0);
+         }
+     }
+ }
+diff --git a/Assets/Drive/Scripts/OnFoot/FootManager.cs b/Assets/Drive/Scripts/OnFoot/FootManager.cs
+index aba604f..ff8b665 100644
+--- a/Assets/Drive/Scripts/OnFoot/FootManager.cs
++++ b/Assets/Drive/Scripts/OnFoot/FootManager.cs
+@@ -496,6 +496,7 @@ namespace Autobahn
+                         dist = Mathf.Max(2, h3.distance - .1f);
+                     cam.SetPositionAndRotation(pivot + back * dist, look);
+                 }
++                if (foot.Hold) cam.rotation *= foot.Hold.CameraKick;
+                 float boatFov = foot.Aiming ? foot.Def.Zoom : 62 + foot.OnBoat.Speed * .12f;
+                 lens.fieldOfView = Mathf.MoveTowards(lens.fieldOfView, boatFov, Time.deltaTime * 120);
+                 return;
+@@ -520,6 +521,8 @@ namespace Autobahn
+                 camDistance = dist < camDistance ? dist : Mathf.MoveTowards(camDistance, dist, Time.deltaTime * 6);
+                 cam.SetPositionAndRotation(pivot + shoulder + back * camDistance, aim);
+             }
++            // The jolt of the last shots (stronger in first person, see WeaponHold.Kick).
++            if (foot.Hold) cam.rotation *= foot.Hold.CameraKick;
+             float fov = foot.Aiming ? foot.Def.Zoom : 65;
+             lens.fieldOfView = Mathf.MoveTowards(lens.fieldOfView, fov, Time.deltaTime * 160);
+             if (DriveCamera.Shake > 0)
+diff --git a/Assets/Drive/Scripts/OnFoot/FootPlayer.cs b/Assets/Drive/Scripts/OnFoot/FootPlayer.cs
+index 43bcff3..b087537 100644
+--- a/Assets/Drive/Scripts/OnFoot/FootPlayer.cs
++++ b/Assets/Drive/Scripts/OnFoot/FootPlayer.cs
+@@ -47,6 +47,9 @@ namespace Autobahn
+         int gunFor = -1;
+         public System.Action<int, Vector3> Fired;      // weapon, aim point: sent online
+         public System.Action<int, int, int> HitRemote;  // slot, damage, kind (0 person, 1 car)
++        // Recoil on the aim (spread, climb) and where the gun is drawn (hand / view model).
++        public WeaponRecoil Recoil { get; } = new WeaponRecoil();
++        public WeaponHold Hold { get; private set; }
+ 
+         public static FootPlayer Spawn(Vector3 position, float yaw)
+         {
+@@ -70,6 +73,8 @@ namespace Autobahn
+             cc.skinWidth = .04f;
+             Rig = HumanRig.Create(transform, Color.white, false);
+             foreach (var t in Rig.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = 2;
++            Hold = gameObject.AddComponent<WeaponHold>();
++            Hold.Rig = Rig;
+             for (int i = 0; i < ammo.Length; i++) ammo[i] = Weapons.All[i].Magazine;
+         }
+ 
+@@ -91,6 +96,7 @@ namespace Autobahn
+             Crouching = false;
+             knockedFor = 0;
+             Rig.Revive();
++            Recoil.Reset();
+             for (int i = 0; i < ammo.Length; i++) ammo[i] = Weapons.All[i].Magazine;
+         }
+ 
+@@ -259,6 +265,7 @@ namespace Autobahn
+                 float zoomSlow = Aiming ? Mathf.Clamp(Def.Zoom / 60f, .25f, 1) : 1;
+                 Yaw += look.x * zoomSlow;
+                 Pitch = Mathf.Clamp(Pitch - look.y * zoomSlow, -80, 80);
++                Recoil.Settle(Time.deltaTime, -look.y * zoomSlow, ref Pitch);
+                 if (k != null)
+                 {
+                     move.y = (k.wKey.isPressed ? 1 : 0) - (k.sKey.isPressed ? 1 : 0);
+@@ -534,7 +541,7 @@ namespace Autobahn
+         {
+             var def = Def;
+             nextShot = Time.time + def.Interval;
+-            Vector3 muzzleWorld = gun ? gun.TransformPoint(muzzle) : transform.position + Vector3.up * 1.4f;
++            Vector3 muzzleWorld = gun ? Hold.MuzzlePoint : transform.position + Vector3.up * 1.4f;
+             if (def.Thrown)
+             {
+                 ammo[Weapon]--;
+@@ -561,7 +568,7 @@ namespace Autobahn
+             // The camera sits behind the player in third person: start the ray at the player.
+             float skip = Vector3.Dot(transform.position + Vector3.up * 1.5f - ray.origin, ray.direction);
+             if (skip > 0) ray.origin += ray.direction * skip;
+-            float spread = def.Spread * (Aiming ? .45f : 1) * (velocity.sqrMagnitude > 4 ? 1.6f : 1);
++            float spread = (def.Spread + Recoil.Bloom) * (Aiming ? .45f : 1) * (velocity.sqrMagnitude > 4 ? 1.6f : 1);
+             Vector3 lastPoint = ray.origin + ray.direction * def.Range;
+             for (int p = 0; p < def.Pellets; p++)
+             {
+@@ -578,6 +585,8 @@ namespace Autobahn
+             Weapons.Flash(muzzleWorld, ray.direction);
+             Weapons.Sound(Weapons.Shot, muzzleWorld, .9f, def.Pitch);
+             DriveCamera.Shake = Mathf.Max(DriveCamera.Shake, def.Damage * def.Pellets / 250f);
++            Recoil.Shot(def, Aiming, Crouching, ref Pitch);
++            Hold.Kick(def, FootManager.FirstPerson);
+             Fired?.Invoke(Weapon, lastPoint);
+         }
+ 
+@@ -734,22 +743,17 @@ namespace Autobahn
+                 gunFor = Weapon;
+                 if (gun) foreach (var t in gun.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = 2;
+             }
+-            if (!gun) return;
+-            gun.gameObject.SetActive(!Dead && !Kneeling && !Riding && !InPlane);
+-            var aim = AimRotation;
+-            var cam = Camera.main;
+-            if (FootManager.FirstPerson && cam)
+-            {
+-                bool rifle = Def.Length > .5f;
+-                Vector3 hold = Aiming ? new Vector3(0, -.13f, rifle ? .22f : .38f) : rifle ? new Vector3(.24f, -.26f, .28f) : new Vector3(.2f, -.2f, .42f);
+-                if (Reloading) hold += new Vector3(0, -.12f, -.05f);
+-                gun.SetPositionAndRotation(cam.transform.TransformPoint(hold), cam.transform.rotation * (Reloading ? Quaternion.Euler(25, -20, 0) : Quaternion.identity));
+-            }
+-            else
+-            {
+-                Vector3 hand = Rig.RightHand ? Rig.RightHand.position : transform.position + Vector3.up * 1.3f;
+-                gun.SetPositionAndRotation(hand + aim * new Vector3(-.02f, .03f, .05f), aim * (Reloading ? Quaternion.Euler(30, 0, 0) : Quaternion.identity));
+-            }
++            if (gun) gun.gameObject.SetActive(!Dead && !Kneeling && !Riding && !InPlane);
++            // Placed by WeaponHold, after the body is animated and the camera has moved.
++            Hold.Gun = gun;
++            Hold.Muzzle = muzzle;
++            Hold.Def = Def;
++            Hold.Aim = AimRotation;
++            Hold.ViewModel = FootManager.FirstPerson && !Dead;
++            Hold.AimAtCrosshair = true;
++            Hold.Aiming = Aiming;
++            Hold.Reloading = Reloading;
++            Hold.Ignore = OnBoat ? OnBoat.transform : null;
+         }
+     }
+ }
+diff --git a/Assets/Drive/Scripts/OnFoot/HumanRig.cs b/Assets/Drive/Scripts/OnFoot/HumanRig.cs
+index cc1e668..b0e914b 100644
+--- a/Assets/Drive/Scripts/OnFoot/HumanRig.cs
++++ b/Assets/Drive/Scripts/OnFoot/HumanRig.cs
+@@ -225,6 +225,7 @@ namespace Autobahn
+             if (Model && Model.gameObject.activeSelf == Hidden) Model.gameObject.SetActive(!Hidden);
+             CrouchPose();
+             KneelPose();
++            AimPose();
+             // First person: the body is not drawn (the gun is held in front of the camera).
+             if (HideHead == hidden) return;
+             hidden = HideHead;
+@@ -283,6 +284,24 @@ namespace Autobahn
+             }
+         }
+ 
++        // Holding a gun: the chest leans with the aim, so the arms (and the gun in the right
++        // hand, WeaponHold) go up and down with it. Not in first person: the camera sits on the
++        // head, and the body is not drawn there anyway.
++        void AimPose()
++        {
++            float w = Armed && !HideHead && !Hidden ? upperWeight * (1 - deadWeight) * (1 - kneel) : 0;
++            if (w <= 0 || !Anim || !Anim.isHuman) return;
++            Vector3 aim = AimDirection;
++            float pitch = Mathf.Atan2(aim.y, new Vector2(aim.x, aim.z).magnitude) * Mathf.Rad2Deg;
++            pitch = Mathf.Clamp(pitch, -55, 55) * w;
++            // A turn about the body's right tips it forward: looking up is a negative turn.
++            Vector3 right = transform.right;
++            var spine = Anim.GetBoneTransform(HumanBodyBones.Spine);
++            var chest = Anim.GetBoneTransform(HumanBodyBones.Chest);
++            if (spine) spine.rotation = Quaternion.AngleAxis(-pitch * (chest ? .35f : .8f), right) * spine.rotation;
++            if (chest) chest.rotation = Quaternion.AngleAxis(-pitch * .45f, right) * chest.rotation;
++        }
++
+         // Crouching is laid on top of whatever the legs are doing (added turns, not a fixed pose),
+         // so walking while crouched still steps.
+         void CrouchPose()
+diff --git a/Assets/Drive/Scripts/OnFoot/WeaponHold.cs b/Assets/Drive/Scripts/OnFoot/WeaponHold.cs
+new file mode 100644
+index 0000000..611666f
+--- /dev/null
++++ b/Assets/Drive/Scripts/OnFoot/WeaponHold.cs
+@@ -0,0 +1,219 @@
++using UnityEngine;
++
++namespace Autobahn
++{
++    // Where a held gun is drawn. Runs after the body is animated (and bent by HumanRig's own
++    // LateUpdate poses) and after the camera is placed, so the gun never trails the hand or
++    // the view by a frame.
++    // - Third person: at the right hand (HumanRig.RightHand), the barrel turned onto what the
++    //   crosshair is on (the local player) or along the aim (a friend online).
++    // - First person (the local player): a view model, the gun and forearms in a fixed pose by
++    //   the camera. It is drawn shrunk towards the eye, which looks the same on screen but keeps
++    //   it out of walls in front; closer still, the gun is pulled back and down.
++    // Also the visual recoil: the gun kicks back and up on a spring, the camera jolts with it.
++    [DefaultExecutionOrder(100)]
++    public sealed class WeaponHold : MonoBehaviour
++    {
++        public HumanRig Rig;
++        // Set every frame by the owner.
++        public Transform Gun;                   // from Weapons.Model, parented to the owner
++        public Vector3 Muzzle;                  // in the gun's own frame
++        public WeaponDef Def;
++        public Quaternion Aim = Quaternion.identity;
++        public bool ViewModel;                  // first person: in front of the camera
++        public bool AimAtCrosshair;             // third person, local: onto what the camera looks at
++        public bool Aiming, Reloading;
++        public Transform Ignore;                // not a wall for the view model (the boat we stand in)
++
++        // Where shots leave from (flash, tracer). In first person the full-size point, so the
++        // flash sits on the shrunk muzzle on screen.
++        public Vector3 MuzzlePoint { get; private set; }
++        // The camera's jolt from the last shots, laid on the view by FootManager.
++        public Quaternion CameraKick => Quaternion.Euler(-camKick.X, 0, camRoll.X);
++
++        // The view model is this much nearer the eye than it looks.
++        const float Shrink = .3f;
++        // Walls for the view model and the crosshair point: everything but ourselves (2),
++        // loose props (11) and trees (12), as for shots.
++        const int ShotMask = ~(1 << 2 | 1 << 11 | 1 << 12);
++
++        struct Spring
++        {
++            public float X, V;
++            public void Step(float dt, float k, float d) { V += (-k * X - d * V) * dt; X += V * dt; }
++        }
++
++        Spring back, lift, side, camKick, camRoll;
++        float wall;
++        Transform rightArm, leftArm;
++        static Material sleeveMat, skinMat;
++        static readonly RaycastHit[] wallHits = new RaycastHit[8];
++
++        // A shot: the gun kicks, harder for the heavy guns and in first person.
++        public void Kick(WeaponDef def, bool firstPerson)
++        {
++            if (def == null || def.Melee || def.Thrown) return;
++            float p = Mathf.Clamp(.35f + def.Kick * .25f, .3f, 2.2f);
++            back.V -= (firstPerson ? 1.2f : .7f) * p;
++            lift.V += (firstPerson ? 90 : 55) * p;
++            side.V += Random.Range(-1f, 1f) * 20 * p;
++            camKick.V += (firstPerson ? 28 : 12) * p;
++            camRoll.V += Random.Range(-1f, 1f) * (firstPerson ? 8 : 3) * p;
++        }
++
++        void Update()
++        {
++            float dt = Mathf.Min(Time.deltaTime, .05f);
++            if (dt <= 0) return;
++            back.Step(dt, 220, 22);
++            lift.Step(dt, 200, 20);
++            side.Step(dt, 200, 24);
++            camKick.Step(dt, 160, 18);
++            camRoll.Step(dt, 160, 20);
++        }
++
++        void LateUpdate()
++        {
++            bool shown = Gun && Gun.gameObject.activeInHierarchy && Def != null;
++            var cam = Camera.main;
++            bool view = shown && ViewModel && cam;
++            if (shown)
++            {
++                if (view) PlaceViewModel(cam.transform);
++                else PlaceInHand(cam);
++            }
++            Arms(view);
++        }
++
++        void PlaceInHand(Camera cam)
++        {
++            Vector3 hand = Rig && Rig.RightHand ? Rig.RightHand.position : transform.position + Vector3.up * 1.3f;
++            Vector3 grip = hand + Aim * new Vector3(-.02f, .03f, .05f);
++            Quaternion r = Aim;
++            // The camera looks over the shoulder: turn the barrel onto what the crosshair is on,
++            // not parallel to it (a little at most, so nothing close by swings the gun round).
++            if (AimAtCrosshair && cam)
++            {
++                var c = cam.transform;
++                Vector3 from = c.position, dir = c.forward;
++                float skip = Vector3.Dot(transform.position + Vector3.up * 1.5f - from, dir);
++                if (skip > 0) from += dir * skip;
++                float range = Mathf.Max(5, Def.Range);
++                Vector3 target = Physics.Raycast(from, dir, out RaycastHit hit, range, ShotMask, QueryTriggerInteraction.Ignore) ? hit.point : from + dir * range;
++                Vector3 to = target - grip;
++                if (to.sqrMagnitude > 4) r = Quaternion.RotateTowards(Aim, Quaternion.LookRotation(to, Aim * Vector3.up), 20);
++            }
++            if (Reloading) r *= Quaternion.Euler(30, 0, 0);
++            grip += r * new Vector3(0, 0, back.X * .5f);
++            r *= Quaternion.Euler(-lift.X * .6f, side.X * .5f, 0);
++            Gun.localScale = Vector3.one;
++            Gun.SetPositionAndRotation(grip, r);
++            MuzzlePoint = Gun.TransformPoint(Muzzle);
++        }
++
++        void PlaceViewModel(Transform cam)
++        {
++            bool rifle = Def.Length > .5f;
++            Vector3 hold = Aiming ? new Vector3(0, -.13f, rifle ? .22f : .38f) : rifle ? new Vector3(.24f, -.26f, .28f) : new Vector3(.2f, -.2f, .42f);
++            Quaternion turn = Quaternion.identity;
++            if (Reloading) { hold += new Vector3(0, -.12f, -.05f); turn = Quaternion.Euler(25, -20, 0); }
++
++            // Something right in front of the eye: bring the gun back and down, barrel aside.
++            Vector3 eye = cam.position;
++            // One look ahead as far as the full-size gun would reach (for the muzzle below);
++            // the shrunk gun itself only needs `reach`.
++            float full = hold.z + Def.Length * .8f + .1f;
++            float reach = full * Shrink + .06f;
++            float blocked = WallAhead(eye, cam.forward, Mathf.Max(full, reach));
++            float want = blocked < reach ? Mathf.Clamp01((reach - blocked) / reach * 1.8f) : 0;
++            wall = Mathf.MoveTowards(wall, want, Time.deltaTime * 6);
++            hold += new Vector3(-.05f, -.08f, -.16f) * wall;
++            turn = Quaternion.Euler(40 * wall, -15 * wall, 12 * wall) * turn;
++
++            hold.z += back.X;
++            Quaternion r = cam.rotation * Quaternion.Euler(-lift.X, side.X, 0) * turn;
++            Vector3 at = cam.TransformPoint(hold);
++            Gun.SetPositionAndRotation(eye + (at - eye) * Shrink, r);
++            Gun.localScale = Vector3.one * Shrink;
++
++            // Full size, the muzzle would be here; never past the wall in front.
++            Vector3 m = at + r * Muzzle;
++            float along = Vector3.Dot(m - eye, cam.forward);
++            float room = Mathf.Max(.02f, blocked - .05f);
++            if (blocked < float.MaxValue && along > room) m = eye + (m - eye) * (room / along);
++            MuzzlePoint = m;
++        }
++
++        // How far in front of the eye the nearest wall is (MaxValue: none within `reach`).
++        float WallAhead(Vector3 eye, Vector3 dir, float reach)
++        {
++            int n = Physics.SphereCastNonAlloc(eye, .05f, dir, wallHits, reach, ShotMask, QueryTriggerInteraction.Ignore);
++            float nearest = float.MaxValue;
++            for (int i = 0; i < n; i++)
++            {
++                var h = wallHits[i];
++                if (h.distance <= 0) continue;        // started inside: nothing to go by
++                if (Ignore && h.collider.transform.IsChildOf(Ignore)) continue;
++                if (h.distance < nearest) nearest = h.distance;
++            }
++            return nearest;
++        }
++
++        // The forearms holding the view model: the right one on the grip, the left one under the
++        // barrel of a long gun. Plain shapes, placed full size and shrunk like the gun.
++        void Arms(bool view)
++        {
++            bool right = view && !Def.Thrown;
++            bool left = right && Def.Length > .5f && !Reloading;
++            if (right && !rightArm) rightArm = MakeArm("View arm R");
++            if (left && !leftArm) leftArm = MakeArm("View arm L");
++            if (rightArm && rightArm.gameObject.activeSelf != right) rightArm.gameObject.SetActive(right);
++            if (leftArm && leftArm.gameObject.activeSelf != left) leftArm.gameObject.SetActive(left);
++            if (!right) return;
++            var cam = Camera.main.transform;
++            Vector3 eye = cam.position;
++            // The gun is shrunk: back to full size to work out where the hands go.
++            Vector3 Full(Vector3 shrunk) => eye + (shrunk - eye) / Shrink;
++            Vector3 gripAt = Full(Gun.TransformPoint(new Vector3(0, -.05f, -.01f)));
++            PlaceArm(rightArm, eye, gripAt, cam.TransformPoint(new Vector3(.34f, -.5f, .02f)), cam.up);
++            if (left)
++            {
++                Vector3 underBarrel = Full(Gun.TransformPoint(new Vector3(0, -.04f, Def.Length * .45f)));
++                PlaceArm(leftArm, eye, underBarrel, cam.TransformPoint(new Vector3(-.26f, -.5f, .1f)), cam.up);
++            }
++        }
++
++        static void PlaceArm(Transform arm, Vector3 eye, Vector3 hand, Vector3 elbow, Vector3 up)
++        {
++            Vector3 d = elbow - hand;
++            float len = Mathf.Max(.1f, d.magnitude);
++            arm.SetPositionAndRotation(eye + (hand - eye) * Shrink, Quaternion.LookRotation(d, up));
++            arm.localScale = Vector3.one * Shrink;
++            var sleeve = arm.GetChild(0);
++            sleeve.localPosition = new Vector3(0, 0, len * .5f + .04f);
++            sleeve.localScale = new Vector3(.085f, len * .5f, .085f);
++        }
++
++        Transform MakeArm(string name)
++        {
++            if (!sleeveMat)
++            {
++                sleeveMat = Art.Material("View sleeve", new Color(.17f, .19f, .21f), 0, .2f);
++                skinMat = Art.Material("View hand", new Color(.78f, .58f, .46f), 0, .35f);
++            }
++            var arm = new GameObject(name).transform;
++            arm.SetParent(transform, false);
++            // A capsule lies along y: turned to lie along the arm (z).
++            var sleeve = Art.Primitive(arm, "Sleeve", Vector3.zero, Vector3.one, sleeveMat, PrimitiveType.Capsule);
++            sleeve.localRotation = Quaternion.Euler(90, 0, 0);
++            Art.Box(arm, "Hand", new Vector3(0, 0, -.01f), new Vector3(.07f, .09f, .11f), skinMat);
++            foreach (var r in arm.GetComponentsInChildren<Renderer>(true))
++            {
++                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
++                r.gameObject.layer = gameObject.layer;
++            }
++            arm.gameObject.layer = gameObject.layer;
++            return arm;
++        }
++    }
++}
+diff --git a/Assets/Drive/Scripts/OnFoot/WeaponHold.cs.meta b/Assets/Drive/Scripts/OnFoot/WeaponHold.cs.meta
+new file mode 100644
+index 0000000..0c3d247
+--- /dev/null
++++ b/Assets/Drive/Scripts/OnFoot/WeaponHold.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 1481a884afe1412b84bd1d804e5e6af4
+\ No newline at end of file
+diff --git a/Assets/Drive/Scripts/OnFoot/WeaponRecoil.cs b/Assets/Drive/Scripts/OnFoot/WeaponRecoil.cs
+new file mode 100644
+index 0000000..daaa167
+--- /dev/null
++++ b/Assets/Drive/Scripts/OnFoot/WeaponRecoil.cs
+@@ -0,0 +1,48 @@
++using UnityEngine;
++
++namespace Autobahn
++{
++    // What a shot does to the local player's aim: the spread grows over a burst (bloom) and the
++    // aim climbs (Pitch goes up) and settles back once the trigger is let go. Shotgun and sniper
++    // kick hardest; aiming (Q) and crouching steady the gun.
++    public sealed class WeaponRecoil
++    {
++        public float Bloom { get; private set; }   // extra spread, degrees
++        public float Climb { get; private set; }   // how far the aim is still pushed up, degrees
++        float lastShot = -10, interval = .1f;
++
++        bool InBurst => Time.time - lastShot < interval + .08f;
++
++        // A shot: lifts `pitch` (negative is up) and widens the next shots.
++        public void Shot(WeaponDef def, bool aiming, bool crouching, ref float pitch)
++        {
++            float steady = (aiming ? .6f : 1) * (crouching ? .75f : 1);
++            float kick = def.Kick * steady * Random.Range(.85f, 1.15f);
++            // Only what the aim actually moved comes back (looking straight up it cannot climb).
++            float lift = Mathf.Clamp(kick, 0, pitch + 80);
++            pitch -= lift;
++            Climb += lift;
++            Bloom = Mathf.Min(Bloom + def.Bloom * steady, def.Bloom * 6);
++            lastShot = Time.time;
++            interval = def.Interval;
++        }
++
++        // Every frame: the climb comes back slowly during a burst, quickly after it. Pulling the
++        // mouse down against the climb counts towards it, so the aim does not end up too low.
++        public void Settle(float dt, float pulledDown, ref float pitch)
++        {
++            if (pulledDown > 0) Climb = Mathf.Max(0, Climb - pulledDown);
++            bool burst = InBurst;
++            Bloom *= Mathf.Exp(-dt * (burst ? .4f : 5));
++            if (Bloom < .01f) Bloom = 0;
++            float back = Climb * (1 - Mathf.Exp(-dt * (burst ? 2 : 7)));
++            back = Mathf.Min(back, 80 - pitch);
++            if (back <= 0) return;
++            pitch += back;
++            Climb -= back;
++            if (Climb < .01f) Climb = 0;
++        }
++
++        public void Reset() { Bloom = Climb = 0; lastShot = -10; }
++    }
++}
+diff --git a/Assets/Drive/Scripts/OnFoot/WeaponRecoil.cs.meta b/Assets/Drive/Scripts/OnFoot/WeaponRecoil.cs.meta
+new file mode 100644
+index 0000000..1b64e97
+--- /dev/null
++++ b/Assets/Drive/Scripts/OnFoot/WeaponRecoil.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 134ca675f7274e2fa03836a68f944e2d
+\ No newline at end of file
+diff --git a/Assets/Drive/Scripts/OnFoot/Weapons.cs b/Assets/Drive/Scripts/OnFoot/Weapons.cs
+index 4c6374e..4bb0ea2 100644
+--- a/Assets/Drive/Scripts/OnFoot/Weapons.cs
++++ b/Assets/Drive/Scripts/OnFoot/Weapons.cs
+@@ -8,6 +8,9 @@ namespace Autobahn
+     {
+         public string Name, Model;
+         public float Damage, Interval, Spread, Range, Reload, Length, Pitch, Zoom;
++        // Recoil per shot: how far the aim climbs (degrees of Pitch) and how much wider the next
++        // shots spread (degrees, grows over a burst). Also sets how hard the gun kicks on screen.
++        public float Kick, Bloom;
+         public int Magazine, Pellets = 1;
+         public bool Auto, Melee, Thrown;
+     }
+@@ -17,12 +20,12 @@ namespace Autobahn
+         public static readonly WeaponDef[] All =
+         {
+             new() { Name = "КУЛАКИ", Melee = true, Damage = 25, Interval = .6f, Range = 1.9f, Magazine = 0 },
+-            new() { Name = "ПИСТОЛЕТ M1911", Model = "M1911", Damage = 34, Interval = .22f, Spread = .5f, Range = 150, Reload = 1.4f, Magazine = 8, Length = .22f, Pitch = 1.15f, Zoom = 50 },
+-            new() { Name = "UZI", Model = "Uzi", Damage = 17, Interval = .065f, Spread = 2.4f, Range = 120, Reload = 1.6f, Magazine = 25, Length = .42f, Pitch = 1.25f, Auto = true, Zoom = 50 },
+-            new() { Name = "АК-74", Model = "AK74", Damage = 29, Interval = .1f, Spread = 1.1f, Range = 300, Reload = 2.2f, Magazine = 30, Length = .92f, Pitch = .95f, Auto = true, Zoom = 42 },
+-            new() { Name = "M4", Model = "M4_8", Damage = 26, Interval = .085f, Spread = .9f, Range = 300, Reload = 2f, Magazine = 30, Length = .88f, Pitch = 1.02f, Auto = true, Zoom = 40 },
+-            new() { Name = "ДРОБОВИК", Model = "Bennelli_M4", Damage = 13, Pellets = 9, Interval = .75f, Spread = 5f, Range = 60, Reload = 2.6f, Magazine = 7, Length = 1.0f, Pitch = .72f, Zoom = 50 },
+-            new() { Name = "СНАЙПЕРКА M107", Model = "M107", Damage = 110, Interval = 1.2f, Spread = 0, Range = 700, Reload = 3f, Magazine = 5, Length = 1.4f, Pitch = .6f, Zoom = 14 },
++            new() { Name = "ПИСТОЛЕТ M1911", Model = "M1911", Damage = 34, Interval = .22f, Spread = .5f, Range = 150, Reload = 1.4f, Magazine = 8, Length = .22f, Pitch = 1.15f, Zoom = 50, Kick = 1.4f, Bloom = .35f },
++            new() { Name = "UZI", Model = "Uzi", Damage = 17, Interval = .065f, Spread = 2.4f, Range = 120, Reload = 1.6f, Magazine = 25, Length = .42f, Pitch = 1.25f, Auto = true, Zoom = 50, Kick = .55f, Bloom = .3f },
++            new() { Name = "АК-74", Model = "AK74", Damage = 29, Interval = .1f, Spread = 1.1f, Range = 300, Reload = 2.2f, Magazine = 30, Length = .92f, Pitch = .95f, Auto = true, Zoom = 42, Kick = .9f, Bloom = .3f },
++            new() { Name = "M4", Model = "M4_8", Damage = 26, Interval = .085f, Spread = .9f, Range = 300, Reload = 2f, Magazine = 30, Length = .88f, Pitch = 1.02f, Auto = true, Zoom = 40, Kick = .75f, Bloom = .25f },
++            new() { Name = "ДРОБОВИК", Model = "Bennelli_M4", Damage = 13, Pellets = 9, Interval = .75f, Spread = 5f, Range = 60, Reload = 2.6f, Magazine = 7, Length = 1.0f, Pitch = .72f, Zoom = 50, Kick = 4.5f, Bloom = 1.5f },
++            new() { Name = "СНАЙПЕРКА M107", Model = "M107", Damage = 110, Interval = 1.2f, Spread = 0, Range = 700, Reload = 3f, Magazine = 5, Length = 1.4f, Pitch = .6f, Zoom = 14, Kick = 7f, Bloom = 2f },
+             // Thrown along an arc (Bomb.cs); the "reload" is fetching three more.
+             new() { Name = "БОМБА", Thrown = true, Damage = 0, Interval = .8f, Range = 40, Reload = 3.5f, Magazine = 3, Length = .2f, Zoom = 60 },
+         };
