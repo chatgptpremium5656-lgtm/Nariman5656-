@@ -1,158 +1,257 @@
-# Модели для Autobahn: Sketchfab, лицензия CC BY (CC Attribution)
+# Готовые модели для Autobahn — Sketchfab, CC BY, без доработки
 
-Все модели ниже найдены через API Sketchfab с фильтром «можно скачать» + «CC Attribution» (30.09.2026).
-Ссылка на модель: `https://sketchfab.com/3d-models/<uid>`. Число треугольников указано рядом с каждой.
-**CC BY = нужно указать автора** (титры, экран «Авторы»). Перед импортом проверить лицензию на странице модели ещё раз.
+Модели отобраны через API Sketchfab 30.09.2026 по трём условиям: лицензия **CC Attribution (CC BY)**, можно скачать, треугольников не больше лимита категории. Их можно ставить в игру без упрощения и запекания.
 
-Как оценивать для игры:
-- до ~15k треугольников — можно сразу;
-- 15–150k — упростить (decimate) и сделать LOD;
-- больше 150k (сканы) — только как исходник для запекания или для героя кадра, в игру нельзя без переделки.
+Лимиты по числу треугольников: дома до 25k, деревья до 12k, кусты до 6k, трава до 3k, камни до 15k, дорожные мелочи до 8k, порт до 30k, аэропорт до 40k. Внутри категории модели отсортированы по популярности.
 
-## 1. Дома и здания (город, городок на севере)
-| Модель | Автор | Треуг. | uid |
+**CC BY = в титрах указать автора и ссылку.** Перед скачиванием глянуть лицензию на странице модели.
+
+
+## Дома и здания
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| LOW POLY – Soviet Apartment Building 8K | Colin.Greenall | 10k | 05229ac1d1f94e6c8cacaad91110c602 |
-| Modern NYC Dwellings | 99.Miles | 7k | 8ef9555171c44ba1872a17558f589630 |
-| [FREE] London, Kinnaird House | 99.Miles | 54k | ff13d8c9407f4796886a689a758dc862 |
-| Old Building | yadrogames | 0.5k | f72b3723f2a34b6691455947fef598d6 |
-| Abandoned Building / Shop / Old House | yadrogames | 13k | 0ed14367314946b298d9a58db66da040 |
-| Residences of Rothenburg ob der Tauber (немецкие фахверки) | shotkey | 39k | af81933914b14dcbbb39bd8a0bbafaaf |
-| Old Residential Building [4k] | andrej.grave | 277k (упростить) | dd400ed693cf416e940c5b8e3107205e |
-| Soviet Block Apartment | Reinaw13 | 4.5k | f33d988dbfd84bbf9b610f3848203058 |
-| Gas station (АЗС) | Elbolilloduro | 52k | eeb913b90b4344ddbd7852f82a7ef160 |
-| Gas station Props | Elbolilloduro | 13k | 8fcd52f1b12e4b4296589b4c6328b777 |
+| CCity Building Set 1 | neberkenezer | 18 372 | https://sketchfab.com/3d-models/a2d5c7bfcc2148fb8994864c43dfcc97 |
+| Warehouse FBX Model Free | Nicholas01 | 11 106 | https://sketchfab.com/3d-models/daa7fd3ff88945298d00045ca40a4c03 |
+| Abandoned House | Sengchor | 12 234 | https://sketchfab.com/3d-models/a0c01ce35a474545b805c0739806aace |
+| Post-Apocalyptic / House / Dirty / Old / Wooden | yadrogames | 7 952 | https://sketchfab.com/3d-models/a0d3931586a14385b6617cf7160aaa47 |
+| Abandoned / Building / Shop / Old / House | yadrogames | 12 792 | https://sketchfab.com/3d-models/0ed14367314946b298d9a58db66da040 |
+| Low / House / Building / Apocalypse / Dirty | yadrogames | 2 407 | https://sketchfab.com/3d-models/a4ba41df514e447095c2106f85734093 |
+| LOW POLY - SOVIET  APARTMENT BUILDING 8K | Colin.Greenall | 10 392 | https://sketchfab.com/3d-models/05229ac1d1f94e6c8cacaad91110c602 |
+| Old Building / Lowpoly | Fridqeir | 2 872 | https://sketchfab.com/3d-models/1f304c6e56324c19955a18aa79b15b9f |
+| Game Ready City Buildings | mireubay1 | 9 726 | https://sketchfab.com/3d-models/12ac98aa701548adbfa463157f05f6cf |
+| Low / Farm / Assembly / Dirty / House / Poor | yadrogames | 820 | https://sketchfab.com/3d-models/60156c85ad9e43498e15f2fbd529a5da |
+| Parking garage [FREE DOWNLOAD] | idmental.id | 5 370 | https://sketchfab.com/3d-models/5310b7d77b70427d936ec4253fff679c |
+| Gas station Props | Elbolilloduro | 12 659 | https://sketchfab.com/3d-models/8fcd52f1b12e4b4296589b4c6328b777 |
+| Game ready building 5 | mireubay1 | 4 144 | https://sketchfab.com/3d-models/73b1d5fc97ca46bab7f80b7c95001e79 |
+| Building / Container / Metal | yadrogames | 920 | https://sketchfab.com/3d-models/36380c606bae46848237e9bbe073fa3b |
+| Game Ready City Building | mireubay1 | 7 726 | https://sketchfab.com/3d-models/2bd7122c0f774cb48565187848154436 |
 
-## 2. Деревья
-**Ель / сосна**
-| Модель | Автор | Треуг. | uid |
+## Ель и сосна
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Pine trees pack (lowpoly, game ready, LODs) | lolipop_1707 | 128k на пак, с LOD | e1e9c07b8e2e445c943fec660beefba2 |
-| Spruce | evolveduk | 8k | a50a5df3164246a5af97992cec33a143 |
-| Low-Poly Game-Ready Spruce Tree | Dark_Knife15 | 3.7k | ef06bbc949b64e81a5016e18d3263416 |
-| Pine Tree [Game-ready] | Wenedi | 1.6k | dc3fbd9205cf4027a4455d1f415e0478 |
-| Realistic HD Norway spruce (серия 43 шт.) | PlantCatalog | 50–145k (упростить) | facebfa5baf84c4aafc1141745570714 |
+| Pine tree | sheh5262 | 2 173 | https://sketchfab.com/3d-models/e52769d653cd4e52a4acff3041961e65 |
+| Pine Tree | evolveduk | 5 627 | https://sketchfab.com/3d-models/d45218a3fab349e5b1de040f29e7b6f9 |
+| Pine_Tree | IGamEFry88 | 3 391 | https://sketchfab.com/3d-models/fbd656918d5e4126b82c7b41432aff5f |
+| Snow Pine Tree and Bush Pack LOWPOLY | evan4129 | 1 246 | https://sketchfab.com/3d-models/7afc4ca23dd84adea90dc0ba8506c500 |
+| Low Poly Pine | ilikecatsnotdogs | 708 | https://sketchfab.com/3d-models/107e3eab9dcb4e29a282c6709178752f |
+| Pine tree low-poly | 380660711785 | 282 | https://sketchfab.com/3d-models/e72f2c31aac544e58b667c13ec718daf |
+| Spruce | evolveduk | 7 822 | https://sketchfab.com/3d-models/a50a5df3164246a5af97992cec33a143 |
+| Scots Pine Trees Set | c3posw01 | 9 973 | https://sketchfab.com/3d-models/422b961ff3d14e7baa7e9077572b2247 |
+| Fir tree | evolveduk | 4 455 | https://sketchfab.com/3d-models/3f39aa5485e94477a36b435f7a1a8b54 |
+| Pine Tree | dizaynxana.com | 334 | https://sketchfab.com/3d-models/9e1f7c39fd904eb88047e4c23979f363 |
+| Pine tree 01 | POLYSCAN3D | 8 736 | https://sketchfab.com/3d-models/ba7c8f8e1cb549b3a3a30f1221386c8c |
+| Spruce Tree - Low Poly | nenjo | 778 | https://sketchfab.com/3d-models/b68f79aee62f4e849be265c903f724f5 |
+| Pine Tree low poly | daniel.2U | 596 | https://sketchfab.com/3d-models/9cde1025662e4954b1f803c2d4bb719d |
+| Spruce tree | intice184 | 10 387 | https://sketchfab.com/3d-models/7a5db417827244d98827459bce0cc944 |
 
-**Берёза**
-| Модель | Автор | Треуг. | uid |
+## Берёза
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Five Birch trees pack (lowpoly, LODs) | lolipop_1707 | 136k на пак, с LOD | 08fe5117138e4fdaa7ca440ef1201e07 |
-| Birch tree | evolveduk | 7k | aa842dffd9654d33b8b91170ce83c172 |
-| Birch trees | Igor_K. | 13k | de6263e5400b4a52a795decf84f06575 |
-| Birch Tree | coffe0wolf | 21k | 4d04ccf7bef7498abcd4bfd50533bba8 |
+| Birch tree | evolveduk | 7 413 | https://sketchfab.com/3d-models/aa842dffd9654d33b8b91170ce83c172 |
+| Gt 016 Birch 01 | ztrztr3 | 9 927 | https://sketchfab.com/3d-models/57070f9908c3436fa7af78ee041bd9eb |
+| Gt 016 Birch 02 | ztrztr3 | 8 306 | https://sketchfab.com/3d-models/1e234ab6faf74f8f91d2bddff77d9cc2 |
+| Birch pines | simonfab | 543 | https://sketchfab.com/3d-models/ff081af984bd4a87829d2b06fe3e428d |
+| Birch tree | MXUD | 4 549 | https://sketchfab.com/3d-models/a6cb17b168e14f12beca371a2ab801d0 |
 
-**Лиственные и смешанные**
-| Модель | Автор | Треуг. | uid |
+## Лиственные деревья
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Oak Tree / Game Ready | mapletree | 13k | 2f4ae6b907fd4741abda5d1b71c83b10 |
-| Realistic Trees Collection | jungle_jim | 128k на пак | fe67c886eebf4bcb988d7c45e69995ad |
-| Various Forest Assets Pack | dariiiii | 130k на пак | cf138b8eb2d340cda643ed59f824989c |
+| Oak tree | massive-graphisme | 7 112 | https://sketchfab.com/3d-models/3dc59560f2d24345bdbe65c44636453b |
+| Realistic Cracked Tree Game-Ready prop | aliosa123 | 3 509 | https://sketchfab.com/3d-models/b0edfdc157e94ea093ee959c65db38de |
+| Low Poly Tree Pack | louieoliva | 8 816 | https://sketchfab.com/3d-models/ea6e844754da494a9c38501b4fff92ad |
+| Free Pack - Tree | polyone | 7 253 | https://sketchfab.com/3d-models/196525a9936a40c1ba7e74ce5c071d59 |
+| POPLAR TREE - HIGHT TEXTURE LOW-POLY MODEL | evseevdaniil0011 | 5 762 | https://sketchfab.com/3d-models/ec7c1d301bbc43dca5fe5f0650148d13 |
+| Oak tree | evolveduk | 8 364 | https://sketchfab.com/3d-models/6468dd4d3eb240ef902b9057d9913606 |
+| Tree | billyjackman3d | 1 219 | https://sketchfab.com/3d-models/615fbc82493c49569dab81a7b7e535e5 |
+| Low Poly Tree with twisting branches | purepoly | 1 126 | https://sketchfab.com/3d-models/4e2589134f2442bcbdab51c1f306cd58 |
+| Low Poly Tree | simonustal | 1 328 | https://sketchfab.com/3d-models/4598c065d5534c40b6050c16b69d1b77 |
+| Realistic Palm Tree 4 Free | NextSpring | 8 096 | https://sketchfab.com/3d-models/917c18d6b2d04d33950dea6e20bc074f |
+| Palm Tree | mikejimmyalmeida | 658 | https://sketchfab.com/3d-models/45a74e13bdcb433fa77a24b7113c189d |
+| Palm Tree Realistic | 00amza | 1 812 | https://sketchfab.com/3d-models/ced3b31f14f940d0b7480a83e6f8c9c0 |
+| 33 leaf trees pack | falk | 785 | https://sketchfab.com/3d-models/cdf0276f13b54e29b9009b09c8ad473a |
 
-## 3. Кусты, трава, папоротник
-| Модель | Автор | Треуг. | uid |
+## Кусты
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Lilac bush pack (12 вариантов, LODs) | lolipop_1707 | 63k на пак | 10312697ec994fc99355cb94f1963a2e |
-| Grass Bushes (game ready) | apariciosilva3D | 0.6k | aa1fa43af9bf4228adfddb54ea123ad1 |
-| Realistic Beech Fern Plant | 3d-artist-shop | 0.7k | adf1e8832cf74a8a94c98792fa1d9088 |
-| Grass (pack of 9 vars, lowpoly) | lolipop_1707 | 92 | 0561204a1fa14c17939300ee1108948b |
-| Grass pack (lowpoly, game-ready) | lolipop_1707 | 543 | 422f42f618d342c6958b02613dc57403 |
-| Grass claster | architect47 | 486 | 832eb6c9c5b24790b1ca24ad7dfdcdba |
-| Grass patches | bumstrum | 1.9k | 6952780b80594a31aab2dedf7249a47a |
-| Some Foliage | soidev | 6.6k | 5e806681504a4642a16a59c057d34e8d |
+| Trees and bush Pack LOWPOLY | evan4129 | 212 | https://sketchfab.com/3d-models/f2a25ee70df440c9ab03d57aba2dc3f2 |
+| Real Bush | marblesstudio | 472 | https://sketchfab.com/3d-models/62618c3260b142cfb7ef499d75a8d21a |
+| Plant Bush | Batuhan13 | 756 | https://sketchfab.com/3d-models/42cb7fad10ba44ecbc9ae9cf5fdd63b6 |
+| Margarita flower bush | blujay | 2 740 | https://sketchfab.com/3d-models/c88faac7729b49e688dbc4d95f182168 |
+| Cliff Shrub For Terrain | lemedesign | 244 | https://sketchfab.com/3d-models/7a0f2bf2982c4ff8bacc67856fdbfae2 |
+| Tall Bush | scadl | 96 | https://sketchfab.com/3d-models/acc6c43913864ace8d5942d65417ab35 |
+| Snow Pine Tree and Bush Pack LOWPOLY | evan4129 | 1 246 | https://sketchfab.com/3d-models/7afc4ca23dd84adea90dc0ba8506c500 |
+| Bush | 7thFlare | 2 552 | https://sketchfab.com/3d-models/6f1920d84d5445f9857da7ba8238fd38 |
+| Bush | BaptisteBerard | 160 | https://sketchfab.com/3d-models/7e834bd36441470d94f62145accb18a3 |
+| Small bush | yanix | 320 | https://sketchfab.com/3d-models/f6ed4c70fc024ac88e8e6a19991695af |
+| Low Poly Shrub OR Grass Clover | lemedesign | 913 | https://sketchfab.com/3d-models/acb337dd8f5e41beba654111e3f2475a |
+| Low Poly Shrub - Medium Texture | lemedesign | 334 | https://sketchfab.com/3d-models/04e29bcb52194fc9abb7e5bc0bdcb619 |
+| 3 pine bushes? | tokume | 1 052 | https://sketchfab.com/3d-models/ddac4359daa94d6ea8e98832870b1e0e |
+| Grass And Bush - Mobile GameReady | alihaghshenas821 | 20 | https://sketchfab.com/3d-models/8a6b8a18cbf74de8961c3a042d4edf9f |
+| Low Poly Shrub - Small Texture | lemedesign | 334 | https://sketchfab.com/3d-models/6e16ec47d7c246a69efffb9e857165ed |
 
-## 4. Земля, камни, скалы
-| Модель | Автор | Треуг. | uid |
+## Трава и цветы
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Lowpoly Rocks – 1 / Rocks – 3 | norgeotloic | 21k / 10k | d9ffac943bb24a609c1082c1aa118d76 / c985042a860a40859c4d5ac94f1b3479 |
-| Desert / Rocks / Stones Pack | yadrogames | 14k | c2208f5ccc004f1681d27de67fe75799 |
-| Cliff Low-Poly Game-ready | keam.wf | 17k | 918dc8e1b1f0443993a251c1302510bf |
-| Modular Coastal Cliff Wall Segment | galaxyabundant | 1.6M (запечь/упростить) | 2692c35f76a14832993c88fa2273c153 |
-| Gravel Ground Module Scan | perz_scans | 225k (скан, как текстура) | 6ef549171a894560ad5d70cfad87343e |
-| Forest pine needles ground soil | matousekfoto | 416k (скан, как текстура) | c9f8f46dd7ea4e4bb175b6a6c6bc646a |
+| Grass patches | bumstrum | 1 910 | https://sketchfab.com/3d-models/6952780b80594a31aab2dedf7249a47a |
+| Grass claster / Downoad = Like please | architect47 | 486 | https://sketchfab.com/3d-models/832eb6c9c5b24790b1ca24ad7dfdcdba |
+| Grass | asiam | 117 | https://sketchfab.com/3d-models/6367d6fa23ca4db3baffd69eecbbfda5 |
+| Grass Pack LP | juhyt80 | 324 | https://sketchfab.com/3d-models/3352f9d646ec4f25b8aeb28e4232814a |
+| Flower | alexerhart | 368 | https://sketchfab.com/3d-models/0a0f5b4e595940649ea3cabeb7a4b1e1 |
+| Grass Variations | RBG_illustrations | 1 554 | https://sketchfab.com/3d-models/c84573687bf14f89938002df4ca0e696 |
+| Dry grass | Pixel-bit | 112 | https://sketchfab.com/3d-models/d1484537470441b999d37077aeb9b47a |
+| Flowers | Hippocrocaduck | 1 306 | https://sketchfab.com/3d-models/e9e8b1ca9d3640f8be00b760e1fad170 |
+| fern grass 02 | POLYSCAN3D | 2 128 | https://sketchfab.com/3d-models/93d1f6a261e24b8394d0ea41cf985ef9 |
+| Realistic Grass Pack For Games Free! | Nicholas01 | 794 | https://sketchfab.com/3d-models/9b958d613e9a44dbba580748e7a1789c |
+| Lupine Plant | rufusrockwell | 2 126 | https://sketchfab.com/3d-models/bf30f1110c174d4baedda0ed63778439 |
+| Sunflower | zvanstone | 1 008 | https://sketchfab.com/3d-models/3a9514b8df044abe809432201b8f1c6e |
 
-> Для самой **земли, травы и песка** на тайлах острова лучше подходят бесшовные PBR-текстуры, а не модели: Poly Haven и ambientCG (CC0, указывать автора не нужно).
+## Камни и скалы
 
-## 5. Пляж
-| Модель | Автор | Треуг. | uid |
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Beach kit | jungle_jim | 49k | 6e0e5cc33a1542679f8383e9e260eb90 |
-| Beach Umbrella | stealth86 | 3.8k | 1014ad7c8a4c4aa8ba5e88fc6151aa4f |
-| Beach chair | yacobverse | 52k (упростить) | b1e7c2810f8340a982d138d0349111b5 |
-| Beach Rock formation 02 | lascoyt | 201k (упростить) | 781b996d764b455ab65399b2413309e5 |
-| Sand cliffs | outsider | 167k (упростить) | 1c5f772e12fc44ff995776e38e1953f2 |
-| Sandy beach on Rügen (скан, для текстуры песка) | hhdev | 1M | 6994fc1f559045dab9e5455f27308ecd |
+| Desert / Rocks / Stones / Pack | yadrogames | 13 777 | https://sketchfab.com/3d-models/c2208f5ccc004f1681d27de67fe75799 |
+| Desert / Rock / (FIXED) Pack | yadrogames | 10 251 | https://sketchfab.com/3d-models/00c4468f1bca48509d7d2bd66b564cbc |
+| Lowpoly Rocks - Free Download | norgeotloic | 12 599 | https://sketchfab.com/3d-models/c5da5675001f4bec9ecfbc8343453417 |
+| Desert Rocks | MartynaGrek | 992 | https://sketchfab.com/3d-models/d333ebf8ead74697a1428bafdb97d26b |
+| Low Poly Rocks  Hills  Trees | cengizhaneren | 10 158 | https://sketchfab.com/3d-models/c816111ceea04511885f20105a030f32 |
+| Stone wall | stefan_wr | 2 000 | https://sketchfab.com/3d-models/0788f8b362a6463fa08ad75273c530ea |
+| Free Rock Assets Pack | JonhGillessen | 5 740 | https://sketchfab.com/3d-models/227f976b7675401e978858ddcb7fc0b1 |
+| Lowpoly Rocks - 3 | norgeotloic | 9 990 | https://sketchfab.com/3d-models/c985042a860a40859c4d5ac94f1b3479 |
+| Rock | siesta | 13 728 | https://sketchfab.com/3d-models/b66d5b63deb447299ca3effa904bc789 |
+| Obj_Nat_Rock_01 | SaschaHenrichs | 1 074 | https://sketchfab.com/3d-models/62d63fd7d1dd416aac1496eb19c43cc0 |
+| Square Rock Cracked (Updated Materials) | klessgyzen | 4 032 | https://sketchfab.com/3d-models/22aa59eb632242c3ac2441949c6750b6 |
+| Rocks Low Poly Starter Pack | Dreyx | 5 969 | https://sketchfab.com/3d-models/2a362c908b1047539b1f4f5d78d30b4e |
 
-## 6. Горы (фон и далёкие горы; сам рельеф острова процедурный)
-| Модель | Автор | Треуг. | uid |
+## Пляж
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Snowy Mountain – Terrain | artfromheath | 261k (упростить до ~20k для фона) | 9fa3c56fd32746bcb0e06cd2c4229ca0 |
-| Mountain Range 01 | solararchitect | 524k (упростить) | 6dff907d427f4c9f8d301075f8019c82 |
-| Hero Mountain | solararchitect | 522k (упростить) | 83b3fd690ea44e988d086d5165a5f2ca |
-| Snow Mountain | hkp941111 | 13k | e84a8e5edb2040c591be36350e2536f5 |
+| Coconut Palm | evolveduk | 7 432 | https://sketchfab.com/3d-models/26e787f2ff2e4c0fb004c3b0210805a3 |
+| Palm Trees | yadrogames | 2 857 | https://sketchfab.com/3d-models/55690379305145488e20afb05fc687e6 |
+| Palm Tree Pack LOWPOLY | evan4129 | 8 921 | https://sketchfab.com/3d-models/fd439b0f82c34497aabb21c68ad2fb34 |
+| Plant Series – Palm Tree | spazio_silvestre | 3 392 | https://sketchfab.com/3d-models/e8c0ea53410947b0b7f20d33702f4098 |
+| Curly Palm | evolveduk | 4 532 | https://sketchfab.com/3d-models/00f2b57dd0e844edbeb116034fa471ec |
+| Beach table | JaysonStauffer | 3 376 | https://sketchfab.com/3d-models/e559392994e04527b3f5ee35a8c3c418 |
+| Low Poly Beach Assets | Edwin3D | 12 304 | https://sketchfab.com/3d-models/66c18ecd7a834d4a99dabc46b5ee6e4a |
+| Lifeguard Tower | Sololopenko | 5 969 | https://sketchfab.com/3d-models/2f147eeb428847f7b06244026db6c07e |
+| Low Poly Palms Pack | Rusoski | 8 158 | https://sketchfab.com/3d-models/bf1cadd21a704739bc19d535ae741728 |
+| Beach Chair | stealth86 | 7 376 | https://sketchfab.com/3d-models/57e9477018d244378302070a8738b566 |
+| Palm tree | galaxxxy | 571 | https://sketchfab.com/3d-models/95cd1a77789241ee82a960bad5dfe809 |
+| Beach Umbrella | stealth86 | 3 832 | https://sketchfab.com/3d-models/1014ad7c8a4c4aa8ba5e88fc6151aa4f |
+| Palm Tree tall | pizzaguyty | 1 964 | https://sketchfab.com/3d-models/557ea8d4527f47e8bbc657e2764b7cab |
 
-## 7. Небо: солнце, скайбокс, облака, Луна
-На Sketchfab по этой части почти ничего подходящего. Реалистичное небо в Unity/URP делается иначе:
-- **Скайбокс:** HDRI с Poly Haven (CC0), например дневные с облаками (`kloofendal_48d_partly_cloudy`, `sunflowers`). Материал Skybox/Panoramic или Skybox/Cubemap; ночью отдельный звёздный HDRI и смешивание в `Atmosphere`.
-- **Солнце:** направленный свет плюс Sun Disk в процедурном скайбоксе (Skybox/Procedural, `_SunSize`, `_SunSizeConvergence`) или диск-спрайт с bloom. Модель не нужна.
-- **Облака:** облачный слой в шейдере скайдома (анимированный шум, 2 слоя) или облака-карточки (billboard). Модели-облака (`Fluffy Cloud`, norgeotloic, 1.3k, 2c887a28840f47cfae6b5dee0d11b842) годятся только как декор.
-- **Луна:** сфера плюс текстура NASA CGI Moon Kit (Public Domain, NASA SVS) или модель:
-  | Модель | Автор | Треуг. | uid |
-  |---|---|---|---|
-  | NASA CGI Moon Kit | nebulousflynn | 1M (взять только текстуру, сфера своя) | 1c496b3b57304526b5b9d1cf9c1087fc |
-  | Moon | airstudios3d | 50k | 75c46b8b71ce4b23bb2acb7982fa652c |
-  | Sun (для космоса/стилизации) | SebastianSosnowski | 8k | 9ef1c68fbb944147bcfcc891d3912645 |
+## Горы и рельеф
 
-## 8. Аэропорт
-| Модель | Автор | Треуг. | uid |
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Air Traffic Control Tower | abass20 | 5k | 84f215391662453680e646649d42b264 |
-| Small airport terminal building complex | soysascha | 120k (упростить) | f93a362f8a1f4e2c92f65310cfdd7fe2 |
-| Airport (стилизованный, для идей) | AwesomePoly3D | 3.4k | 8acd6dcbd6464f38a7e6687745b3eb33 |
-| Boeing737 | manilov.ap | 28k | 259de41be0c7410e86b7e79be33d6b3a |
-| Boeing777 | manilov.ap | 9k | 67725bbdf3f148a69e16e9d8aecbc71b |
-| Airport Catering Truck | rwy00 | 58k | 289f4e2cfa3f4722b0476b1fc37681d8 |
-| Fuel Truck | abdullahjavedyo90 | 48k | 443da3cd0f4547c980e52168bfbe7b76 |
-| Airport Tug | flightmaster177 | 216k (упростить) | 388e668f8143432fb82c1268e1f9ab81 |
-| Heliport / Helipad | ahmagh2e | 196k | a3e49574ef3b4026985beef784c5e562 |
+| Low Poly Rocks  Hills  Trees | cengizhaneren | 10 158 | https://sketchfab.com/3d-models/c816111ceea04511885f20105a030f32 |
+| Great Mountain | mrgesy | 39 204 | https://sketchfab.com/3d-models/dd826f1f05c544ccb671949ebca59721 |
+| The Hills | mhart | 4 096 | https://sketchfab.com/3d-models/6d7faf10658e44279da7356cbe749d56 |
+| Mountain low poly For distant mountains | ahmagh2e | 5 000 | https://sketchfab.com/3d-models/cb7f28b5ee0e4ddfb12700ff9d9d35c8 |
+| landscape forest & mountains | dasy444 | 18 600 | https://sketchfab.com/3d-models/94809d21d7aa4cfe9b658a111b35a42c |
+| Snow Mountain | hkp941111 | 13 045 | https://sketchfab.com/3d-models/e84a8e5edb2040c591be36350e2536f5 |
+| Sand / Rock / Desert / Mountain / Pack | yadrogames | 28 704 | https://sketchfab.com/3d-models/cd6689e6b3034be897761225dd44fa59 |
+| Mountain low poly | ahmagh2e | 5 000 | https://sketchfab.com/3d-models/cf8c27b8cc8344a78755505ee42e5a18 |
 
-## 9. Порт и пристань
-| Модель | Автор | Треуг. | uid |
+## Небо, облака, Луна, солнце
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Classic Shipping Container (Free/Gameready) | Sebastian.Hamish.Webster | 17k | 772f4be391a245f699c54e6cf157c58d |
-| Freight shipping container – Rusted | sousinho | 11k | 2b787d1a02174d0bbca9eac34eb3a486 |
-| Container Pack | drcrazzie | 448k на пак | 0d416a9bcfc14978aa50e80281dfe9a5 |
-| Harbor crane | TGVMisterH | 255k (упростить) | d4d582ebd707426f93f1f5a9cdd0ce03 |
-| Container Ship | RM02 | 189k | aaa41cca946b4a08bc08cf692b7757be |
-| Fisher boat / Fishing boat | Batuhan13 / Pabooklas | 9k / 7k | 385b039e95754dca8d8c045ed0c515cf / f4b38ccf5ffb46018aa7931c0e106654 |
-| Wooden Pier | ahmagh2e | 30k | 5ef5b1a858f34583858c0b711d569573 |
-| Simple Wooden Pier or Dock | jungle_jim | 6k | 5bf117cb734a46559d10971c3098165c |
-| the wharf – Fishing Harbor Wood | ahmagh2e | 35k | 8628f993c03d4567b505defff15b85c8 |
-| Sea Bollard / Dock Cleat | fnnduu / buggyprince | 69k / 0.6k | 3f758e298a5b4020be4d7f0929af7697 / 421736f05c1a452f8f25b21ab6a020f0 |
-| The Lighthouse | cotman_sam | 13k | 1a85945dd2a840f594bf6cb003176a54 |
-| Wooden Boxes | MaX3Dd | 4k | ddecbe4586594bddb4822a90c0cba222 |
+| Fluffy Cloud | norgeotloic | 1 350 | https://sketchfab.com/3d-models/2c887a28840f47cfae6b5dee0d11b842 |
+| Moon | shooter24994 | 5 888 | https://sketchfab.com/3d-models/4db2273f6dd943b8ad7fa5e3b1b2431a |
+| FREE - SkyBox Basic Sky | paul_paul_paul | 3 968 | https://sketchfab.com/3d-models/b2a4fd1b92c248abaae31975c9ea79e2 |
+| The Moon | SebastianSosnowski | 3 968 | https://sketchfab.com/3d-models/9916fcec59f04b07b3e8d7f077dc3ded |
+| Milky Way Skybox HDRI panorama | alexandr.melas | 960 | https://sketchfab.com/3d-models/b57711d6a450410ca612c4a36f08ce21 |
 
-## 10. Дорожные предметы
-| Модель | Автор | Треуг. | uid |
+## Аэропорт
+
+| Модель | Автор | Треугольников | Ссылка |
 |---|---|---|---|
-| Street Asset Pack | vmatthew | 38k на пак | f3eb47d02e2e4ab290e66752fa354b48 |
-| Road Signs | FrodoUndead | 14k | c39bf97110494b5db3de84165211f592 |
-| Road pack (not including the road) | drcrazzie | 130k на пак | 021707f910d04907ab576c856a749628 |
-| Barrier & Traffic Cone Pack | sabriayes | 5k | 23c4dfca76a24bf0b21894847867af2a |
-| Traffic Cones | notanotherapocalypticco | 19k | e03b1d2dfdc0416bb8324d15573ea60c |
-| Jersey Barrier | emran.bayati | 1.7k | b52246c9611a42a99a03b425535a0237 |
-| Metal And Concrete Guardrail | ahmagh2e | 14k | a50e5b5cddc74d618b29391168eaab8f |
-| Guard Rail | tylerlherring | 0.8k | 0fe3cc82e4534837b025a9d5ac2fcddd |
-| Various Low-Poly Street Lights | kmb_jr | 11k | 1173b0c4d9b0400bbeaafbee0e94ca59 |
-| Street and City Props (Dumpster, Traffic Light) | spookyghostboo | 16k | 27a6775c51e44bfda8e1ac8725eb3e9e |
-| Old Soviet Bus Stop | GameDevNick | 4k | fe4d132434c24e1c8447a6d1190e8c6d |
-| Bus Stop – low | milionna | 0.5k | 977fe8fc309548299cbc537f382e1a03 |
-| London Street Objects (боллард, урна и т.п.) | pukkafilms | 6.7k | 286fbd6933c0411a9808db6cf815bbd3 |
-| Low Poly – City Items Pack | Dandushik | 14.5k | 5ea62cbfa64f4ad498263b571388386c |
-| Modular Russian Road Signs Pack (URBAN) | UnkaII | 11k | 5d6e2672d73c44b3b0f7bf62e43fad55 |
+| Airport | nermin | 1 300 | https://sketchfab.com/3d-models/734cef12f0a045df93fc8aa41401a123 |
+| Air Traffic Control Tower | abass20 | 5 178 | https://sketchfab.com/3d-models/84f215391662453680e646649d42b264 |
+| Airport baggage equipment (cart) lowpoly | menX1151 | 1 974 | https://sketchfab.com/3d-models/7ae8444bb5044376a04ee7bb0664ff39 |
+| Aircraft tractor lowpoly model | menX1151 | 3 044 | https://sketchfab.com/3d-models/2e9a078c365243c888f4c70f85be7b85 |
+| Hangar | nermin | 8 440 | https://sketchfab.com/3d-models/64f7d287f5274029bc29755a9839ebbf |
+| Johannesburg airport tower | martin_mikulic | 974 | https://sketchfab.com/3d-models/73b6b31df5fc444da63e64b708e97c3e |
+| Boeing737 | manilov.ap | 28 480 | https://sketchfab.com/3d-models/259de41be0c7410e86b7e79be33d6b3a |
 
-## Порядок работы для локального Claude Code
-1. Скачать glTF/FBX с Sketchfab (нужен аккаунт; API скачивания требует токен).
-2. Проверить лицензию и заполнить файл `CREDITS.md`: модель, автор, ссылка, «CC BY 4.0».
-3. Упростить до бюджета (здания ≤15k, деревья ≤5k на LOD0 плюс LOD1/LOD2, пропсы ≤2k), текстуры 1–2K.
-4. Подключить к генераторам мира вместо процедурных заготовок: `Foliage` (деревья), `GridCity.Townhouse/NycBuilding` (дома), `Art.StreetLamp/RoadSign` (дорожные), `AirportDetail`, `Port`/`PortDistrict`.
-5. Небо: HDRI (Poly Haven, CC0) плюс диск солнца и Луна в `Sky`/`Atmosphere`.
+## Порт и пристань
+
+| Модель | Автор | Треугольников | Ссылка |
+|---|---|---|---|
+| The Lighthouse | cotman_sam | 13 300 | https://sketchfab.com/3d-models/1a85945dd2a840f594bf6cb003176a54 |
+| Barrels! | toomanydemons | 18 900 | https://sketchfab.com/3d-models/1009f5c51391437e9ed2b97f04b9af31 |
+| Concrete Barrier / Drum Barrel / Fences | Myjato | 13 236 | https://sketchfab.com/3d-models/0b6775113093414c8174982c4d9337a4 |
+| Crates And Barrels | jeandiz | 7 509 | https://sketchfab.com/3d-models/5ae3c72285474862a89d69c2f2ad2246 |
+| Old tin barrel | 3dhdscan | 11 390 | https://sketchfab.com/3d-models/20f1ebee339a4b46b9e547782e2aaba9 |
+| Shipping containers | jeandiz | 48 | https://sketchfab.com/3d-models/cc3f7136710f4905905eae1d10ac50b7 |
+| Classic Shipping Container (Free/Gameready) | Sebastian.Hamish.Webster | 17 110 | https://sketchfab.com/3d-models/772f4be391a245f699c54e6cf157c58d |
+| Low Poly / Closed Barrels | Den1121 | 19 392 | https://sketchfab.com/3d-models/8df46c47099a4b9d9bc4a69edcad1b88 |
+| Cargo Crate | boysichterman | 1 367 | https://sketchfab.com/3d-models/19a32159a3d6443e95105f4f7cb51c39 |
+| New thin barrel | 3dhdscan | 9 098 | https://sketchfab.com/3d-models/88b78b63a6b94015a07eb24afe58a807 |
+| Low Poly / Pallets | Den1121 | 1 824 | https://sketchfab.com/3d-models/18fbfb830f294b44aa8dff530cc2ea12 |
+| Old pier (Game ready) | PT34 | 9 084 | https://sketchfab.com/3d-models/3c21842960a74452a13609a584f38762 |
+| Forklift low poly | 380660711785 | 4 426 | https://sketchfab.com/3d-models/8ab650b3982243f8b661142de50f79c9 |
+| pallet truck | Kwon_Hyuk | 4 528 | https://sketchfab.com/3d-models/0419ee072fa4427aaadc2afbcae2894d |
+| Freight shipping container - Rusted | sousinho | 11 098 | https://sketchfab.com/3d-models/2b787d1a02174d0bbca9eac34eb3a486 |
+| Old and dusty multi-crate storage | ionstudios | 5 882 | https://sketchfab.com/3d-models/f0596d78d9d24107a4401fd6ef1843c4 |
+
+## Дорожные предметы
+
+| Модель | Автор | Треугольников | Ссылка |
+|---|---|---|---|
+| Road Traffic Sign | jacky15621419 | 7 210 | https://sketchfab.com/3d-models/13eeb2da01c046a1a0fc8ce8a7e262ab |
+| Modular Chain Link Fence Set | FrodoUndead | 3 100 | https://sketchfab.com/3d-models/bd85a8005ff0403cab2f1e9845016b8f |
+| Fences / Concretes / Metal / Desert / Old / Pack | yadrogames | 2 476 | https://sketchfab.com/3d-models/0cbf546419cf499cbabfee3af0916215 |
+| Trash can | bazz4r | 6 030 | https://sketchfab.com/3d-models/3836ff67877248c2a820e6a969984aac |
+| Old fence | Tim0 | 528 | https://sketchfab.com/3d-models/3a98eabc0aa9475db5fcf7fab235751b |
+| Old Soviet Bus Stop | GameDevNick | 4 364 | https://sketchfab.com/3d-models/fe4d132434c24e1c8447a6d1190e8c6d |
+| Pripyat chainlink fence | nkilstrup | 2 516 | https://sketchfab.com/3d-models/35adb2f2461c4d30bc94e803bb50de50 |
+| Old / Street / Fences / Pack | yadrogames | 1 156 | https://sketchfab.com/3d-models/0953ef9c6e9b4a099daf53f91d29cf09 |
+| Low / Fences / Old / Rusty / Desert / Pack | yadrogames | 3 241 | https://sketchfab.com/3d-models/c196e6c907bb44c2ae733de5754e0d3f |
+| Fence | ahmagh2e | 3 400 | https://sketchfab.com/3d-models/0adbc93269c94b70b99d0627a3ee54f5 |
+| Low / Concretes / Fences / Pack | yadrogames | 5 060 | https://sketchfab.com/3d-models/d51ae3c04800472fbe1e4a7fdeea4eb4 |
+| Small self-stand fence OKP | aleksey-k | 3 334 | https://sketchfab.com/3d-models/9c78bf2e37bb44a98a25db07ce749487 |
+| Barrier & Traffic Cone Pack | sabriayes | 5 138 | https://sketchfab.com/3d-models/23c4dfca76a24bf0b21894847867af2a |
+| Bus Stop - low | milionna | 520 | https://sketchfab.com/3d-models/977fe8fc309548299cbc537f382e1a03 |
+| Metal road billboard single sided | Frice | 860 | https://sketchfab.com/3d-models/6534d76c592d4a0da374d3861e2d506a |
+| Sign package | pedramashoori | 572 | https://sketchfab.com/3d-models/2d153f387f264bca819357601eff3574 |
+
+## Небо, солнце, облака, Луна, земля и песок — бесплатно без указания автора (CC0)
+
+Реалистичное небо в игре — это не модели, а HDRI-панорамы и текстуры. Лучший бесплатный источник — Poly Haven (CC0: можно всё, указывать автора не нужно).
+
+**Небо (скайбокс, дневные облака, закат, ночь)**
+- Все HDRI неба: https://polyhaven.com/hdris/skies
+- Ясно, облака: https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky
+- Облачно, мягкий свет: https://polyhaven.com/a/kloofendal_overcast_puresky
+- Высокое солнце: https://polyhaven.com/a/qwantani_noon_puresky
+- Закат: https://polyhaven.com/a/qwantani_sunset_puresky
+- Ночь с луной: https://polyhaven.com/a/qwantani_moon_noon_puresky
+- Звёздная ночь: https://polyhaven.com/a/satara_night_no_lamps
+
+**Луна (текстура, NASA, свободная)**
+- NASA CGI Moon Kit: https://svs.gsfc.nasa.gov/4720
+- Готовые модели Луны CC BY: The Moon (SebastianSosnowski, 3 968) — в таблице выше.
+
+**Солнце** — не модель: диск солнца в шейдере неба плюс направленный свет и bloom.
+
+**Земля, трава, песок, скалы (бесшовные PBR-текстуры 1–2K, CC0)**
+- Poly Haven, текстуры: https://polyhaven.com/textures
+  - трава: https://polyhaven.com/a/aerial_grass_rock
+  - лесная подстилка: https://polyhaven.com/a/forest_ground_04
+  - песок пляжа: https://polyhaven.com/a/aerial_beach_01
+  - скала: https://polyhaven.com/a/aerial_rocks_02
+  - асфальт: https://polyhaven.com/a/asphalt_02
+- ambientCG (тоже CC0): https://ambientcg.com/list?type=material
+
+**Ещё готовые паки CC0 (без указания автора, игровые, лёгкие)**
+- Quaternius — природа, города, машины: https://quaternius.com
+- Kenney — дороги, город, аэропорт, порт: https://kenney.nl/assets
+- Poly Haven, модели (деревья, камни, пропсы): https://polyhaven.com/models
